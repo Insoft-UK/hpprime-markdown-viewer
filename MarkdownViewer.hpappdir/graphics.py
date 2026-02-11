@@ -1,4 +1,4 @@
-from hpprime import eval, fillrect
+from hpprime import eval, fillrect, dimgrob
 
 def color_to_rgb(color):
     """Extract R, G, B components from a 24-bit hex color."""
@@ -44,22 +44,54 @@ def text_width(text, fontsize):
     return result
 
 
-def draw_image(gr, x, y, pixel_data, img_width, img_height):
-    """Draw a raw RGB image pixel by pixel.
+def draw_image(gr, x, y, pixel_data, img_width, img_height,
+               tmp_gr=5):
+    """Draw a raw RGB image using off-screen buffer with run-length optimization.
 
     pixel_data is bytes: R,G,B triplets for each pixel, row by row.
+    White pixels (0xFFFFFF) are treated as transparent (not drawn).
+    Draws to a temp buffer first, then blits to the destination in one call.
+    Consecutive same-color pixels in each row are merged into a single fillrect.
     """
+    # Create temp grob filled with white (matches background)
+    dimgrob(tmp_gr, img_width, img_height, 0xFFFFFF)
+
+    # Draw pixels row by row with horizontal run-length optimization
     idx = 0
     for row in range(img_height):
+        run_start = 0
+        run_color = -1
+
         for col in range(img_width):
             if idx + 2 < len(pixel_data):
                 r = pixel_data[idx]
                 g = pixel_data[idx + 1]
                 b = pixel_data[idx + 2]
                 color = (r << 16) | (g << 8) | b
-                if color != 0xFFFFFF:  # skip white for transparency
-                    fillrect(gr, x + col, y + row, 1, 1, color, color)
                 idx += 3
+            else:
+                color = -1
+
+            # White pixels are transparent — skip them
+            if color == 0xFFFFFF:
+                color = -1
+
+            if color != run_color:
+                # Flush previous run if it's a visible color
+                if run_color >= 0:
+                    fillrect(tmp_gr, run_start, row,
+                             col - run_start, 1, run_color, run_color)
+                run_start = col
+                run_color = color
+
+        # Flush last run in row
+        if run_color >= 0:
+            fillrect(tmp_gr, run_start, row,
+                     img_width - run_start, 1, run_color, run_color)
+
+    # Blit to destination in one call (no transparency needed, white = background)
+    blit(gr, x, y, x + img_width, y + img_height,
+         tmp_gr, 0, 0, img_width, img_height)
 
 
 def open_file(gr, name, app_name=""):
