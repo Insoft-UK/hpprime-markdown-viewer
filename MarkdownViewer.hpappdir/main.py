@@ -69,6 +69,8 @@ def draw_file_browser(md_files, selected):
     draw_text(GR_AFF, (320 - tw) // 2, 5, "Markdown Viewer", FONT_14, COLOR_HEADER)
     draw_text(GR_AFF, 10, 25, "Select a Markdown file", FONT_12, COLOR_HEADER)
     draw_rectangle(GR_AFF, 5, 42, 315, 43, COLOR_HEADER, 255, COLOR_HEADER, 255)
+    draw_rectangle(GR_AFF, 5, 43, 6, 222, COLOR_HEADER, 255, COLOR_HEADER, 255)
+    draw_rectangle(GR_AFF, 314, 43, 315, 222, COLOR_HEADER, 255, COLOR_HEADER, 255)
 
     max_visible = 9
     start = 0
@@ -86,6 +88,7 @@ def draw_file_browser(md_files, selected):
     if len(md_files) == 0:
         draw_text(GR_AFF, 15, 30, "No .md files found", FONT_10, COLOR_RED)
 
+    draw_rectangle(GR_AFF, 5, 222, 315, 223, COLOR_HEADER, 255, COLOR_HEADER, 255)
     draw_text(GR_AFF, 10, 225, "Up/Down:Select  Enter/Tap:Open  ON:Exit", FONT_10, COLOR_GRAY)
 
 

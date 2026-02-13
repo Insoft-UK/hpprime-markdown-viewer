@@ -3,7 +3,8 @@ from graphics import (draw_text, draw_rectangle, text_width, draw_image,
 from constants import (FONT_10, FONT_12, FONT_14,
     COLOR_NORMAL, COLOR_HEADER, COLOR_CODE, COLOR_BOLD, COLOR_ITALIC, COLOR_BG,
     COLOR_TABLE_BORDER, COLOR_TABLE_HEADER_BG, COLOR_TABLE_ALT_BG,
-    COLOR_WARNING, TABLE_MAX_COLS, TABLE_CELL_PAD, GR_TMP, TRANSPARENCY)
+    COLOR_WARNING, TABLE_MAX_COLS, TABLE_CELL_PAD, GR_TMP, TRANSPARENCY,
+    COLOR_CODE_BG)
 
 
 class MarkdownViewer:
@@ -47,6 +48,8 @@ class MarkdownRenderer:
         self.line_height = 12
         self.scroll_offset = 0
         self._table_buffer = []
+        self._in_code_fence = False
+        self._content_height = 0
 
     def _in_view(self, y, h=12):
         """Check if a line at y with height h is fully within the visible area."""
@@ -64,10 +67,11 @@ class MarkdownRenderer:
         self.clear()
         self.current_y = self.y - self.scroll_offset
         self._table_buffer = []
+        self._in_code_fence = False
         lines = markdown_text.split('\n')
 
         for line in lines:
-            if self.current_y > self.y + self.height:
+            if self._content_height > 0 and self.current_y > self.y + self.height:
                 break
             self._render_line(line)
 
@@ -75,9 +79,21 @@ class MarkdownRenderer:
         if self._table_buffer:
             self._flush_table()
 
+        # Calculate total content height for scroll clamping
+        self._content_height = self.current_y + self.scroll_offset - self.y
+
     def _render_line(self, line):
         """Render a single line of markdown."""
         line = line.rstrip()
+
+        # Handle code fences
+        if line.startswith('```'):
+            self._in_code_fence = not self._in_code_fence
+            return
+
+        if self._in_code_fence:
+            self._render_code_line(line)
+            return
 
         # Check if we're collecting table rows
         if self._table_buffer:
@@ -107,10 +123,22 @@ class MarkdownRenderer:
             text = line[dot + 1:].lstrip()
             if text:
                 self._render_list_item(text, bullet=num + '.')
-        elif line.startswith('```'):
-            return
         else:
             self._render_paragraph(line)
+
+    def _render_code_line(self, line):
+        """Render a line inside a code fence with gray background."""
+        if self._in_view(self.current_y, self.line_height):
+            # Draw gray background across full width
+            draw_rectangle(self.gr, self.x, self.current_y,
+                           self.x + self.width, self.current_y + self.line_height,
+                           COLOR_CODE_BG, 255, COLOR_CODE_BG, 255)
+            # Draw code text with code color on gray background
+            if line:
+                draw_text(self.gr, self.x + 4, self.current_y,
+                          line, FONT_10, COLOR_CODE, self.width - 4,
+                          bg_color=COLOR_CODE_BG)
+        self.current_y += self.line_height
 
     def _is_ordered_list(self, line):
         """Check if line starts with a number followed by '. '."""
@@ -305,6 +333,7 @@ class MarkdownRenderer:
                 if not word:
                     continue
 
+                word = str(word)
                 w = text_width(word, FONT_10)
                 if current_x + w > max_x and current_x > start_x:
                     self.current_y += self.line_height
@@ -464,6 +493,11 @@ class MarkdownRenderer:
                     result.append((buf >> bits) & 0xFF)
         return bytes(result)
 
+    def _max_scroll(self):
+        """Get the maximum scroll offset."""
+        max_off = self._content_height - self.height
+        return max_off if max_off > 0 else 0
+
     def scroll_up(self, amount=20):
         """Scroll content up."""
         self.scroll_offset -= amount
@@ -473,12 +507,18 @@ class MarkdownRenderer:
     def scroll_down(self, amount=20):
         """Scroll content down."""
         self.scroll_offset += amount
+        m = self._max_scroll()
+        if self.scroll_offset > m:
+            self.scroll_offset = m
 
     def scroll_by(self, delta):
         """Scroll by an arbitrary pixel amount (positive = down)."""
         self.scroll_offset += delta
         if self.scroll_offset < 0:
             self.scroll_offset = 0
+        m = self._max_scroll()
+        if self.scroll_offset > m:
+            self.scroll_offset = m
 
 
 class MarkdownDocument:

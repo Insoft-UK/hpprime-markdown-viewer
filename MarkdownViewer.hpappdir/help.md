@@ -30,7 +30,21 @@ No PC required.
 ### Smooth Scrolling
 - Press **Up** to scroll up
 - Press **Down** to scroll down
+- Drag on the **touchscreen** to scroll
 - Press **ON** to exit
+
+### Code Snippets
+
+Inline code like `viewer.render()` is highlighted.
+
+Code fences are also supported:
+
+```
+from markdown_viewer import MarkdownViewer
+viewer = MarkdownViewer(0)
+viewer.load_markdown_file("help.md")
+viewer.render()
+```
 
 ## Why MarkdownViewer?
 
