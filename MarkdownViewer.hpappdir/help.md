@@ -5,6 +5,17 @@
 Read beautifully formatted documents right on your HP Prime.
 No PC required.
 
+## Navigation
+
+![Navigation](Navigation_1.png)
+
+- Press **Up/Down** to scroll line by line
+- Press **+/-** to scroll page by page
+- Press **Backspace** to jump to start
+- Press **LOG** to jump to end
+- Drag on the **touchscreen** to scroll
+- Press **ON** to exit
+
 ## Features
 
 ### Rich Text Rendering
@@ -20,18 +31,11 @@ No PC required.
 
 ### Tables
 
-| Key | Action |
-|---|---|
-| Up | Scroll up |
-| Down | Scroll down |
-| Enter | Open file |
-| ON | Exit |
-
-### Smooth Scrolling
-- Press **Up** to scroll up
-- Press **Down** to scroll down
-- Drag on the **touchscreen** to scroll
-- Press **ON** to exit
+| Function | HP Prime | Python |
+|---|---|---|
+| Print | PRINT() | print() |
+| Input | INPUT() | input() |
+| Wait | WAIT() | time.sleep() |
 
 ### Code Snippets
 

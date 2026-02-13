@@ -17,6 +17,9 @@ KEY_ESC = 4
 KEY_ENTER = 30
 KEY_BACKSPACE = 19
 KEY_ON = 46
+KEY_PLUS = 50
+KEY_MINUS = 45
+KEY_LOG = 25
 
 chars = {
           -1: '',

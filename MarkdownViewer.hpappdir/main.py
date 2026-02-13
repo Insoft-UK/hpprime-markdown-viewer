@@ -1,18 +1,17 @@
 from constants import (GR_AFF, FONT_10, FONT_12, FONT_14,
     COLOR_BLACK, COLOR_WHITE, COLOR_HEADER, COLOR_RED, COLOR_GRAY,
     DRAG_THRESHOLD)
-from hpprime import eval, fillrect, keyboard
+from hpprime import eval, fillrect
 from graphics import draw_text, draw_rectangle, text_width, get_mouse
-from keycodes import KEY_UP, KEY_DOWN, KEY_ENTER, KEY_ON
+from keycodes import KEY_UP, KEY_DOWN, KEY_ENTER, KEY_ON, KEY_PLUS, KEY_MINUS, KEY_BACKSPACE, KEY_LOG
 from file_ops import list_files
 from markdown_viewer import MarkdownViewer
 
 
 def get_key():
     """Read the current key code, or 0 if none pressed."""
-    if keyboard():
-        return eval('GETKEY()')
-    return 0
+    k = eval('GETKEY()')
+    return k if k > 0 else 0
 
 
 def get_touch_y():
@@ -170,10 +169,16 @@ def main():
             if key > 0:
                 if key == KEY_UP:
                     viewer.scroll_up()
-                    viewer.render()
                 elif key == KEY_DOWN:
                     viewer.scroll_down()
-                    viewer.render()
+                elif key == KEY_PLUS:
+                    viewer.scroll_page_down()
+                elif key == KEY_MINUS:
+                    viewer.scroll_page_up()
+                elif key == KEY_BACKSPACE:
+                    viewer.scroll_to_top()
+                elif key == KEY_LOG:
+                    viewer.scroll_to_bottom()
 
             # Handle touch drag scrolling
             touch_y = get_touch_y()

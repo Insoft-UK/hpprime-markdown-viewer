@@ -1,7 +1,13 @@
 # Deploy HP Prime app to target directories
 $ErrorActionPreference = "Stop"
 
-$appName = "MarkdownViewer.hpappdir"
+# Find the .hpappdir directory in the script's folder
+$appDir = Get-ChildItem -Path $PSScriptRoot -Directory -Filter "*.hpappdir" | Select-Object -First 1
+if (-not $appDir) {
+    Write-Error "No .hpappdir directory found in $PSScriptRoot"
+    exit 1
+}
+$appName = $appDir.Name
 
 $source = Join-Path $PSScriptRoot $appName
 
@@ -53,6 +59,35 @@ foreach ($app in $apps) {
     if (Test-Path $app) {
         Write-Host "Starting $app" -ForegroundColor Cyan
         Start-Process -FilePath $app
+    }
+}
+
+# Bring HP Prime Virtual Calculator to foreground
+# Alt-key trick: simulating Alt press allows SetForegroundWindow to work
+if (-not ('FgWindow' -as [type])) {
+    Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class FgWindow {
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")]
+    public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);
+    public static void Activate(IntPtr hwnd) {
+        keybd_event(0xA4, 0, 0, 0);           // Alt down
+        keybd_event(0xA4, 0, 2, 0);           // Alt up
+        SetForegroundWindow(hwnd);
+    }
+}
+"@
+}
+for ($i = 0; $i -lt 10; $i++) {
+    Start-Sleep -Milliseconds 500
+    $emulator = Get-Process -Name "HPPrime" -ErrorAction SilentlyContinue
+    if ($emulator -and $emulator.MainWindowHandle -ne [IntPtr]::Zero) {
+        [FgWindow]::Activate($emulator.MainWindowHandle)
+        Write-Host "Brought HP Prime to foreground." -ForegroundColor Cyan
+        break
     }
 }
 

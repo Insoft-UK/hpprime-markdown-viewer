@@ -34,6 +34,22 @@ class MarkdownViewer:
         """Scroll the document by delta pixels."""
         self.document.scroll_by(delta)
 
+    def scroll_page_up(self):
+        """Scroll up by one page."""
+        self.document.scroll_page_up()
+
+    def scroll_page_down(self):
+        """Scroll down by one page."""
+        self.document.scroll_page_down()
+
+    def scroll_to_top(self):
+        """Scroll to beginning of file."""
+        self.document.scroll_to_top()
+
+    def scroll_to_bottom(self):
+        """Scroll to end of file."""
+        self.document.scroll_to_bottom()
+
 
 class MarkdownRenderer:
     """Lightweight markdown renderer for HP Prime display (320x240)."""
@@ -79,8 +95,9 @@ class MarkdownRenderer:
         if self._table_buffer:
             self._flush_table()
 
-        # Calculate total content height for scroll clamping
-        self._content_height = self.current_y + self.scroll_offset - self.y
+        # Calculate total content height on first render only
+        if self._content_height == 0:
+            self._content_height = self.current_y + self.scroll_offset - self.y
 
     def _render_line(self, line):
         """Render a single line of markdown."""
@@ -520,6 +537,27 @@ class MarkdownRenderer:
         if self.scroll_offset > m:
             self.scroll_offset = m
 
+    def scroll_page_up(self):
+        """Scroll up by one page."""
+        self.scroll_offset -= self.height
+        if self.scroll_offset < 0:
+            self.scroll_offset = 0
+
+    def scroll_page_down(self):
+        """Scroll down by one page."""
+        self.scroll_offset += self.height
+        m = self._max_scroll()
+        if self.scroll_offset > m:
+            self.scroll_offset = m
+
+    def scroll_to_top(self):
+        """Scroll to the beginning of the document."""
+        self.scroll_offset = 0
+
+    def scroll_to_bottom(self):
+        """Scroll to the end of the document."""
+        self.scroll_offset = self._max_scroll()
+
 
 class MarkdownDocument:
     """Loads and manages markdown document content."""
@@ -560,4 +598,28 @@ class MarkdownDocument:
         """Scroll by delta pixels and re-render."""
         if self.renderer:
             self.renderer.scroll_by(delta)
-            self.renderer.render(self.content) 
+            self.renderer.render(self.content)
+
+    def scroll_page_up(self):
+        """Scroll up by one page and re-render."""
+        if self.renderer:
+            self.renderer.scroll_page_up()
+            self.renderer.render(self.content)
+
+    def scroll_page_down(self):
+        """Scroll down by one page and re-render."""
+        if self.renderer:
+            self.renderer.scroll_page_down()
+            self.renderer.render(self.content)
+
+    def scroll_to_top(self):
+        """Scroll to beginning and re-render."""
+        if self.renderer:
+            self.renderer.scroll_to_top()
+            self.renderer.render(self.content)
+
+    def scroll_to_bottom(self):
+        """Scroll to end and re-render."""
+        if self.renderer:
+            self.renderer.scroll_to_bottom()
+            self.renderer.render(self.content)
