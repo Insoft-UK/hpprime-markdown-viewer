@@ -16,10 +16,19 @@ def draw_rectangle(gr, x1, y1, x2, y2, edge_color, edge_alpha,
     fillrect(gr, x1, y1, w, h, edge_color, fill_color)
 
 
+def _escape_text(text):
+    """Escape special characters for use in PPL eval strings."""
+    text = str(text)
+    text = text.replace('\\', '\\\\')
+    text = text.replace('"', '\\"')
+    return text
+
+
 def draw_text(gr, x, y, text, fontsize, text_color, width=320, bg_color=None):
     """Draw text at (x, y). If bg_color is None, no background is drawn."""
     r1, g1, b1 = color_to_rgb(text_color)
-    cmd = ('TEXTOUT_P("' + str(text) + '",G' + str(gr)
+    safe = _escape_text(text)
+    cmd = ('TEXTOUT_P("' + safe + '",G' + str(gr)
            + "," + str(x) + "," + str(y)
            + "," + str(fontsize)
            + ",RGB(" + str(r1) + "," + str(g1) + "," + str(b1) + ")"
@@ -38,7 +47,8 @@ def get_mouse():
 
 def text_width(text, fontsize):
     """Get the pixel width of text at the given font size."""
-    result = eval('TEXTSIZE("' + str(text) + '",' + str(fontsize) + ')')
+    safe = _escape_text(text)
+    result = eval('TEXTSIZE("' + safe + '",' + str(fontsize) + ')')
     if type(result) is list:
         return result[0]
     return result

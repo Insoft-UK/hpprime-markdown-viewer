@@ -1,18 +1,17 @@
 from constants import (GR_AFF, FONT_10, FONT_12, FONT_14,
     COLOR_BLACK, COLOR_WHITE, COLOR_HEADER, COLOR_RED, COLOR_GRAY,
     DRAG_THRESHOLD)
-from hpprime import eval, fillrect, keyboard
+from hpprime import eval, fillrect
 from graphics import draw_text, draw_rectangle, text_width, get_mouse
-from keycodes import KEY_UP, KEY_DOWN, KEY_ENTER, KEY_ON
+from keycodes import KEY_UP, KEY_DOWN, KEY_ENTER, KEY_ON, KEY_PLUS, KEY_MINUS, KEY_BACKSPACE, KEY_LOG
 from file_ops import list_files
 from markdown_viewer import MarkdownViewer
 
 
 def get_key():
     """Read the current key code, or 0 if none pressed."""
-    if keyboard():
-        return eval('GETKEY()')
-    return 0
+    k = eval('GETKEY()')
+    return k if k > 0 else 0
 
 
 def get_touch_y():
@@ -69,6 +68,8 @@ def draw_file_browser(md_files, selected):
     draw_text(GR_AFF, (320 - tw) // 2, 5, "Markdown Viewer", FONT_14, COLOR_HEADER)
     draw_text(GR_AFF, 10, 25, "Select a Markdown file", FONT_12, COLOR_HEADER)
     draw_rectangle(GR_AFF, 5, 42, 315, 43, COLOR_HEADER, 255, COLOR_HEADER, 255)
+    draw_rectangle(GR_AFF, 5, 43, 6, 222, COLOR_HEADER, 255, COLOR_HEADER, 255)
+    draw_rectangle(GR_AFF, 314, 43, 315, 222, COLOR_HEADER, 255, COLOR_HEADER, 255)
 
     max_visible = 9
     start = 0
@@ -86,6 +87,7 @@ def draw_file_browser(md_files, selected):
     if len(md_files) == 0:
         draw_text(GR_AFF, 15, 30, "No .md files found", FONT_10, COLOR_RED)
 
+    draw_rectangle(GR_AFF, 5, 222, 315, 223, COLOR_HEADER, 255, COLOR_HEADER, 255)
     draw_text(GR_AFF, 10, 225, "Up/Down:Select  Enter/Tap:Open  ON:Exit", FONT_10, COLOR_GRAY)
 
 
@@ -167,10 +169,16 @@ def main():
             if key > 0:
                 if key == KEY_UP:
                     viewer.scroll_up()
-                    viewer.render()
                 elif key == KEY_DOWN:
                     viewer.scroll_down()
-                    viewer.render()
+                elif key == KEY_PLUS:
+                    viewer.scroll_page_down()
+                elif key == KEY_MINUS:
+                    viewer.scroll_page_up()
+                elif key == KEY_BACKSPACE:
+                    viewer.scroll_to_top()
+                elif key == KEY_LOG:
+                    viewer.scroll_to_bottom()
 
             # Handle touch drag scrolling
             touch_y = get_touch_y()

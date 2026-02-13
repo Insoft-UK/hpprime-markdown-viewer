@@ -93,6 +93,29 @@ MarkdownViewer.hpappdir/
 └── MarkdownViewer.hpappprgm      # App program metadata
 ```
 
+## Sample Code
+
+A minimal example showing how the viewer is used in `main.py`:
+
+```python
+from constants import GR_AFF
+from markdown_viewer import MarkdownViewer
+
+# Create viewer targeting the display buffer
+viewer = MarkdownViewer(GR_AFF)
+
+# Load and render a Markdown file
+viewer.load_markdown_file("help.md")
+viewer.render()
+
+# Scroll through the document
+viewer.scroll_down()   # scroll by 20px
+viewer.render()
+
+viewer.scroll_by(50)   # scroll by arbitrary pixel amount
+viewer.render()
+```
+
 ## How It Works
 
 1. **`main.py`** boots the app, scans for `.md` files via `file_ops.list_files()`, and presents a scrollable file browser.
