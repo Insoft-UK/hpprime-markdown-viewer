@@ -35,6 +35,10 @@ Read beautifully formatted Markdown documents right on your calculator's 320×24
 
 ## Demo
 
+
+https://github.com/user-attachments/assets/5307571c-12e3-4f97-8d1d-4dc5f9e3dab0
+
+
 <video src="md_demo.mp4" controls width="320"></video>
 
 ## Getting Started
