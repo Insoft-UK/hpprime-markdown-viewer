@@ -10,7 +10,7 @@ from markdown_viewer import MarkdownViewer
 from input_helpers import get_key, get_touch, get_ticks, get_menu_tap
 from ui import (draw_menu, draw_notch, is_notch_tap,
     save_menu_area, restore_menu_area,
-    show_input_bar, show_context_menu, show_list_manager,
+    show_search_input, show_context_menu, show_list_manager,
     show_stats_dialog)
 from graphics import draw_text, text_width
 from browser import file_picker
@@ -82,6 +82,26 @@ def _browser_menu_tap(slot, selected_file):
     return False
 
 
+_search_pill_x = 320  # left edge of the search status pill
+
+
+def _draw_search_status(viewer):
+    """Draw 'X of Y' search match counter at bottom-right."""
+    global _search_pill_x
+    info = viewer.get_search_info()
+    c = theme.colors
+    _search_pill_x = 320
+    sy = 227
+    if info:
+        cur, total = info
+        label = str(cur) + ' of ' + str(total) + ' matches'
+        tw = text_width(label, FONT_10)
+        sw = tw + 8
+        _search_pill_x = 320 - sw
+        fillrect(GR_AFF, _search_pill_x, sy, sw, 13, c['menu_bg'], c['menu_bg'])
+        draw_text(GR_AFF, _search_pill_x + 4, sy + 2, label, FONT_10, c['menu_text'])
+
+
 def _draw_progress(viewer):
     """Draw a small progress pill at the bottom-left, styled like the notch."""
     pct = viewer.get_progress_percent()
@@ -93,6 +113,7 @@ def _draw_progress(viewer):
     c = theme.colors
     fillrect(GR_AFF, px, py, pw, 13, c['menu_bg'], c['menu_bg'])
     draw_text(GR_AFF, px + 4, py + 2, label, FONT_10, c['menu_text'])
+    _draw_search_status(viewer)
     # Thin reading progress bar at the very top of the screen
     bar_w = int(320 * pct / 100) if pct < 100 else 320
     bar_c = c.get('progress_bar', c['header'])
@@ -148,6 +169,7 @@ def main():
         long_press_fired = False
         menu_visible = False
         action = 'back'
+        scrollbar_dragging = False
 
         def redraw():
             fillrect(0, 0, 0, 320, 240,
@@ -169,16 +191,19 @@ def main():
             draw_menu(VIEWER_MENU, menu_y=MENU_Y)
             menu_visible = True
 
+        search_case = False
+
         def do_search():
-            nonlocal menu_visible
+            nonlocal menu_visible, search_case
             menu_visible = False
-            term = show_input_bar(label="Find:", menu_y=MENU_Y)
+            term, search_case = show_search_input(
+                case_sensitive=search_case, menu_y=MENU_Y)
             fillrect(0, 0, 0, 320, 240,
                      theme.colors['bg'], theme.colors['bg'])
             if term:
-                viewer.search(term)
+                viewer.search(term, case_sensitive=search_case)
             else:
-                viewer.render()
+                viewer.clear_search()
             draw_notch()
             _draw_progress(viewer)
 
@@ -339,37 +364,54 @@ def main():
                         drag_last_y = ty
                         touch_start_time = get_ticks()
                         long_press_fired = False
+                        # Check if starting a scrollbar drag
+                        if not menu_visible and viewer.is_scrollbar_tap(tx, ty):
+                            scrollbar_dragging = True
+                            ratio = viewer.scrollbar_y_to_ratio(ty)
+                            viewer.scroll_to_ratio(ratio)
+                            viewer.render()
+                            draw_notch()
+                            _draw_progress(viewer)
                     else:
-                        moved_lp = abs(tx - tap_x) + abs(ty - tap_y)
-                        if (not long_press_fired and
-                                not menu_visible and
-                                moved_lp < DRAG_THRESHOLD * 3 and
-                                tap_y < MENU_Y):
-                            elapsed = get_ticks() - touch_start_time
-                            if elapsed >= LONG_PRESS_MS:
-                                long_press_fired = True
-                                choice = show_context_menu(
-                                    tap_x, tap_y, ["Add Bookmark"],
-                                    content_bottom=240)
-                                if choice == 0:
-                                    pos = viewer.get_scroll_position()
-                                    marks = bookmarks.add(filename, pos)
-                                    viewer.set_bookmarks(marks)
-                                redraw()
-                                touch_down = False
-                                drag_last_y = -1
+                        # Continue scrollbar drag
+                        if scrollbar_dragging:
+                            ratio = viewer.scrollbar_y_to_ratio(ty)
+                            viewer.scroll_to_ratio(ratio)
+                            viewer.render()
+                            draw_notch()
+                            _draw_progress(viewer)
                         else:
-                            if not menu_visible and ty < MENU_Y and drag_last_y >= 0:
-                                delta = drag_last_y - ty
-                                if abs(delta) >= DRAG_THRESHOLD:
-                                    viewer.scroll_by(delta)
-                                    viewer.render()
-                                    draw_notch()
-                                    _draw_progress(viewer)
-                                    drag_last_y = ty
+                            moved_lp = abs(tx - tap_x) + abs(ty - tap_y)
+                            if (not long_press_fired and
+                                    not menu_visible and
+                                    moved_lp < DRAG_THRESHOLD * 3 and
+                                    tap_y < MENU_Y):
+                                elapsed = get_ticks() - touch_start_time
+                                if elapsed >= LONG_PRESS_MS:
+                                    long_press_fired = True
+                                    choice = show_context_menu(
+                                        tap_x, tap_y, ["Add Bookmark"],
+                                        content_bottom=240)
+                                    if choice == 0:
+                                        pos = viewer.get_scroll_position()
+                                        marks = bookmarks.add(filename, pos)
+                                        viewer.set_bookmarks(marks)
+                                    redraw()
+                                    touch_down = False
+                                    drag_last_y = -1
+                            else:
+                                if not menu_visible and ty < MENU_Y and drag_last_y >= 0:
+                                    delta = drag_last_y - ty
+                                    if abs(delta) >= DRAG_THRESHOLD:
+                                        viewer.scroll_by(delta)
+                                        viewer.render()
+                                        draw_notch()
+                                        _draw_progress(viewer)
+                                        drag_last_y = ty
                 else:
                     if touch_down:
                         touch_down = False
+                        scrollbar_dragging = False
                         if not long_press_fired:
                             moved = abs(tap_y - drag_last_y) if drag_last_y >= 0 else 0
                             if moved < DRAG_THRESHOLD * 2:
@@ -396,6 +438,12 @@ def main():
                                         hide_menu()
                                 elif is_notch_tap(tap_x, tap_y):
                                     show_menu()
+                                elif (tap_y >= 227 and tap_y <= 240
+                                      and tap_x >= _search_pill_x
+                                      and _search_pill_x < 320):
+                                    viewer.search_next()
+                                    draw_notch()
+                                    _draw_progress(viewer)
                                 else:
                                     # Check for link tap
                                     url = viewer.get_link_at(tap_x, tap_y)
