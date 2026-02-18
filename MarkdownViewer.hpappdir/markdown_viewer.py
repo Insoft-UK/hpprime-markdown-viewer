@@ -51,12 +51,13 @@ class MarkdownViewer:
             self.document.renderer._content_height = 0
         self.document.render(self.gr)
 
-    def search(self, term):
+    def search(self, term, case_sensitive=False):
         """Search for term in the document."""
         if not self.document.renderer:
             return False
         r = self.document.renderer
-        r._search_term = term.lower() if term else None
+        r._search_case = case_sensitive
+        r._search_term = term if case_sensitive else (term.lower() if term else None)
         r._search_positions = []
         r._search_match_idx = 0
         if not term:
@@ -92,6 +93,15 @@ class MarkdownViewer:
             r.scroll_offset = m
         self.document.render(self.gr)
 
+    def get_search_info(self):
+        """Return (current_match_1based, total_matches) or None."""
+        if not self.document.renderer:
+            return None
+        r = self.document.renderer
+        if not r._search_term or not r._search_positions:
+            return None
+        return (r._search_match_idx + 1, len(r._search_positions))
+
     def clear_search(self):
         """Clear search highlighting."""
         if self.document.renderer:
@@ -109,6 +119,56 @@ class MarkdownViewer:
         """Restore a saved scroll offset."""
         if self.document.renderer:
             self.document.renderer.scroll_offset = pos
+
+    def is_scrollbar_tap(self, x, y):
+        """Check if a tap at (x,y) is on the scrollbar.
+        
+        Returns True if the tap is within the scrollbar track area.
+        """
+        if not self.document.renderer:
+            return False
+        r = self.document.renderer
+        if r._content_height <= r.height:
+            return False
+        bar_x = r.x + r.width - SCROLLBAR_WIDTH
+        bar_y = r.y
+        bar_h = r.height
+        return x >= bar_x and x <= bar_x + SCROLLBAR_WIDTH and y >= bar_y and y < bar_y + bar_h
+
+    def scroll_to_ratio(self, ratio):
+        """Scroll to a position based on a 0.0-1.0 ratio of the document.
+        
+        Args:
+            ratio: 0.0 = top, 1.0 = bottom
+        """
+        if not self.document.renderer:
+            return
+        r = self.document.renderer
+        max_scroll = r._max_scroll()
+        if max_scroll <= 0:
+            return
+        target_offset = int(max_scroll * max(0.0, min(1.0, ratio)))
+        r.scroll_offset = target_offset
+
+    def scrollbar_y_to_ratio(self, y):
+        """Convert a Y coordinate in the scrollbar to a scroll ratio.
+        
+        Args:
+            y: Y coordinate of tap/drag
+            
+        Returns:
+            Float 0.0-1.0 representing position in document
+        """
+        if not self.document.renderer:
+            return 0.0
+        r = self.document.renderer
+        bar_y = r.y
+        bar_h = r.height
+        if bar_h <= 0:
+            return 0.0
+        # Clamp to scrollbar bounds
+        local_y = max(0, min(bar_h, y - bar_y))
+        return local_y / bar_h
 
     def set_bookmarks(self, positions):
         """Set bookmark positions for scrollbar display."""
@@ -238,6 +298,7 @@ class MarkdownRenderer:
         self._content_height = 0
         self._blockquote_depth = 0
         self._search_term = None
+        self._search_case = False
         self._search_positions = []
         self._search_match_idx = 0
         self._bookmarks = []
@@ -771,7 +832,8 @@ class MarkdownRenderer:
                     clip_w = max_x - current_x
 
                     # Search highlighting
-                    if search_term and search_term in word.lower():
+                    hw = word if self._search_case else word.lower()
+                    if search_term and search_term in hw:
                         draw_rectangle(self.gr, current_x, self.current_y,
                                        current_x + w,
                                        self.current_y + self.line_height,
@@ -1014,6 +1076,19 @@ class MarkdownRenderer:
                                    bar_x + SCROLLBAR_WIDTH + 1, mark_y + 2,
                                    theme.colors['bookmark_mark'], 255,
                                    theme.colors['bookmark_mark'], 255)
+
+        # Search match marks (yellow indicators)
+        if self._search_positions and self._content_height > 0:
+            hl_c = theme.colors['search_hl']
+            for spos in self._search_positions:
+                mark_y = bar_y + int(bar_h * spos / self._content_height)
+                if mark_y < bar_y:
+                    mark_y = bar_y
+                if mark_y > bar_y + bar_h - 2:
+                    mark_y = bar_y + bar_h - 2
+                draw_rectangle(self.gr, bar_x, mark_y,
+                               bar_x + SCROLLBAR_WIDTH, mark_y + 2,
+                               hl_c, 255, hl_c, 255)
 
     def _max_scroll(self):
         """Get the maximum scroll offset."""
