@@ -8,6 +8,8 @@ Read beautifully formatted Markdown documents right on your calculator's 320×24
 
 ## Features
 
+### Markdown Rendering
+
 - **Headers** — H1 through H6 with distinct sizing and color
 - **Bold**, *italic*, ~~strikethrough~~, and `inline code` formatting
 - **[Links](url)** rendered in a distinct color
@@ -16,22 +18,39 @@ Read beautifully formatted Markdown documents right on your calculator's 320×24
 - **Task lists** — `- [x]` and `- [ ]` checkboxes
 - **Horizontal rules** (`---`, `***`, `___`)
 - **Tables** with header styling and alternating row colors (warns if too wide)
-- **Embedded images** via base64-encoded raw pixel data or **image files** (PNG, etc.)\n- **Math formula rendering** — fenced code blocks tagged `math`, `formula`, or `cas` render CAS expressions in pretty-print via the HP Prime CAS engine
+- **Embedded images** via base64-encoded raw pixel data or **image files** (PNG, etc.)
+- **Math formula rendering** — fenced code blocks tagged `math`, `formula`, or `cas` render CAS expressions in pretty-print via the HP Prime CAS engine
+- **Syntax highlighting** in code fences for Python, C/C++, and PPL — keywords, builtins, strings, numbers, and comments are color-coded
 - **Word wrapping** that fits the 320px-wide screen
+
+### Navigation & Viewer
+
 - **Smooth scrolling** with Up/Down keys or **touch drag**
+- **Fast drag scrolling** — pixel-shifted rendering via `strblit` for responsive touch drag
 - **Scroll position indicator** — thin scrollbar on the right edge
+- **Table of Contents** — press F3 or tap TOC to see all headers and jump to any section
+- **Internal links** — links to other `.md` files are tappable; press ESC to go back (multi-level back-stack)
+- **Document info** — press F5 or tap Info to see line count, word count, and estimated reading time
+- **Search** — press F1 to find text, F2 for next match, with highlighting and case-sensitivity toggle
+- **Reading progress** — percentage indicator at the bottom of the screen
+
+### File Browser
+
 - **Built-in file browser** to pick `.md` files from calculator storage
 - **Favorites / pinned files** — tap the yellow \u2605 star on any row to pin it; favorites sort to the top
 - **Recently opened files** — quick access to your last 10 opened files
 - **Sortable column headers** — tap \u2605, Name, or Size headers to sort; tap again to reverse
 - **File size display** — each file’s size is shown in its own column
+- **Reading progress pie charts** — small pie chart on each file row showing how much you've read
 - **Folder-prefix display** — files named `prefix_name.md` display as `prefix/name.md` for visual organization
-- **Back navigation** — press ESC to return to file browser without exiting
-- **Search** — press F1 to find text, F2 for next match, with highlighting
+
+### Themes & Persistence
+
 - **Light / Dark theme** — press F6 to toggle, works in browser and viewer
 - **Multiple bookmarks per file** — long-press to add, red indicators on scrollbar
 - **Bookmark manager** — tap Marks to view, jump to, or delete bookmarks
-- **Auto-save** — last opened file and scroll position remembered
+- **Back navigation** — press ESC to return to file browser without exiting
+- **Auto-save** — last opened file, scroll position, and reading progress remembered across sessions
 
 ## Demo
 https://github.com/user-attachments/assets/5307571c-12e3-4f97-8d1d-4dc5f9e3dab0
@@ -83,11 +102,14 @@ Place any `.md` files in the app's storage folder on the calculator. The built-i
 | **Backspace** | Jump to start |
 | **LOG** | Jump to end |
 | **ESC** | Back to file browser |
-| **Find** (F1) | Search for text |
+| **Find** (F1) | Search for text (with case-sensitivity toggle) |
 | **Next** (F2) | Jump to next search match |
-| **Marks** | Open bookmark manager |
+| **Marks** (F3) | Open bookmark manager |
+| **TOC** (F4) | Table of Contents — jump to any header |
+| **Info** (F5) | Show document stats (lines, words, reading time) |
 | **Theme** (F6) | Toggle light / dark theme |
 | **Long press** | Add bookmark at current position |
+| **Tap .md link** | Open linked file (ESC to go back) |
 | **Touch drag** | Drag to scroll document |
 | **ON** | Exit app |
 
@@ -107,7 +129,10 @@ Place any `.md` files in the app's storage folder on the calculator. The built-i
 | Task list | `- [ ] todo` or `- [x] done` |
 | Horizontal rule | `---`, `***`, or `___` |
 | Tables | `\| col1 \| col2 \|` (up to 5 columns) |
+| Code fences | ` ``` ` or ` ```python ` (syntax highlighting) |
+| Math formulas | ` ```math ` / ` ```formula ` / ` ```cas ` |
 | Images | `![alt](image.png)` or `![alt](data:image/raw;base64,...)` |
+| Internal links | `[text](other.md)` to open another file |
 
 > **Note:** Images can be loaded directly from files (PNG, etc.) placed in the app folder using `![alt](filename.png)`. Alternatively, images can use a custom raw format — the first 4 bytes encode width and height (2 bytes each, big-endian), followed by RGB pixel triplets, all base64-encoded. File-based images that exceed the display width are automatically scaled down.
 
@@ -124,10 +149,10 @@ MarkdownViewer.hpappdir/
 ├── constants.py         # Colors, font sizes, layout constants
 ├── theme.py             # Light/dark theme palettes and toggle
 ├── bookmarks.py         # Multi-bookmark storage per file
-├── file_prefs.py        # Favorites, recent files, and sort preferences
+├── file_prefs.py        # Favorites, recent files, sort prefs, reading progress
 ├── file_ops.py          # File listing via HP Prime AFiles()
 ├── keycodes.py          # Key code constants for GETKEY
-├── utils.py             # Misc helpers (color math, text measurement)
+├── utils.py             # Minimal utility stubs
 ├── time.py              # Simple tick-based timer
 ├── help.md              # Sample Markdown file bundled with the app
 ├── MarkdownViewer.hpapp          # HP Prime app descriptor
@@ -160,16 +185,17 @@ viewer.render()
 
 ## How It Works
 
-1. **`main.py`** boots the app, scans for `.md` files via `file_ops.list_files()`, and presents a scrollable file browser.
-2. When a file is selected, a **`MarkdownViewer`** instance loads and parses the Markdown content.
-3. **`MarkdownRenderer`** walks each line, identifies block-level elements (headers, lists, rules, images), then renders them with word-wrapping and inline formatting to the HP Prime's graphics buffer using `TEXTOUT_P` and `FILLRECT` PPL commands exposed through the `hpprime` MicroPython module.
-4. Scrolling adjusts a vertical offset and re-renders the visible portion of the document.
+1. **`main.py`** boots the app, scans for `.md` files via `file_ops.list_files()`, and presents a column-based file browser with favorites, sorting, and reading progress indicators.
+2. When a file is selected, a **`MarkdownViewer`** instance loads and parses the Markdown content line-by-line to conserve memory.
+3. **`MarkdownRenderer`** walks each line, identifies block-level elements (headers, lists, rules, code fences, math blocks, images), then renders them with word-wrapping, inline formatting, and syntax highlighting to the HP Prime's graphics buffer using `TEXTOUT_P` and `FILLRECT` PPL commands exposed through the `hpprime` MicroPython module.
+4. Scrolling adjusts a vertical offset and re-renders the visible portion. Touch drag uses `strblit` pixel-shifting for smooth, responsive scrolling.
+5. Text width measurements and RGB color strings are cached to minimize costly PPL eval calls during rendering.
 
 ## Limitations
 
 - Tables wider than 5 columns display a warning instead of rendering
-- Code fences (` ``` `) are recognized but the enclosed block is rendered as plain text (no syntax highlighting)
-- Links are displayed in color but cannot be opened on the calculator
+- Syntax highlighting supports Python, C/C++, and PPL; other languages render as plain text
+- Internal links work for `.md` files only; web URLs are displayed but not openable
 - Images must be in the custom base64-encoded raw RGB format described above, or loaded from image files in the app folder
 - Search highlights matches in paragraphs, lists, and blockquotes (not in headers, tables, or code fences)
 - Bold is simulated via 1px-offset double-draw (no true bold font on HP Prime)
@@ -181,11 +207,11 @@ Contributions are welcome! Feel free to open issues or submit pull requests.
 
 Some ideas for future improvements:
 
-- Syntax highlighting in code fences
 - Horizontal scrolling for wide tables and code blocks
 - Draggable scrollbar for fast navigation
 - Font size selector
 - Search result count and navigation
+- More syntax highlighting languages
 
 ## License
 

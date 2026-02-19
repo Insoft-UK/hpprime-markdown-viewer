@@ -702,7 +702,8 @@ class MarkdownRenderer:
             render_formula(self.gr, fx, self.current_y,
                            expr, fw, fh,
                            c.get('formula_border', c['table_border']),
-                           c['normal'])
+                           c['normal'],
+                           c.get('formula_bg', 0xF0F0FF))
 
         self.current_y += total_h + 4
 

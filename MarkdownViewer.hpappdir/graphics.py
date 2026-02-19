@@ -265,7 +265,7 @@ def _rgb_str(color):
 
 
 def render_formula(gr, dest_x, dest_y, expr, expr_w, expr_h,
-                   border_color, text_color):
+                   border_color, text_color, bg_color=0xF0F0FF):
     """Render a formula as formatted text in a bordered box."""
     display = format_math(expr)
     safe = _escape_text(display)
@@ -274,15 +274,16 @@ def render_formula(gr, dest_x, dest_y, expr, expr_w, expr_h,
     gh = expr_h + pad * 2
     bc = _rgb_str(border_color)
     tc = _rgb_str(text_color)
+    bgc = _rgb_str(bg_color)
 
     x1 = dest_x
     y1 = dest_y
     x2 = x1 + gw + 1
     y2 = y1 + gh + 1
 
-    # Draw bordered white box
-    eval("RECT_P(G%d,%d,%d,%d,%d,%s,RGB(255,255,255))" %
-         (gr, x1, y1, x2, y2, bc))
+    # Draw bordered box with theme background
+    eval("RECT_P(G%d,%d,%d,%d,%d,%s,%s)" %
+         (gr, x1, y1, x2, y2, bc, bgc))
 
     # Draw formatted text
     eval('TEXTOUT_P("%s",G%d,%d,%d,%d,%s,%d)' %
