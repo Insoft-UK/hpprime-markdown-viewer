@@ -8,14 +8,14 @@ from hpprime import eval as heval
 
 def get_key():
     """Read the current key code, or 0 if none pressed."""
-    heval('wait(0.05)')
+    heval('wait(1/20)')
     k = heval('GETKEY()')
     return k if k > 0 else 0
 
 
 def get_key_fast():
     """Read key with shorter wait — use during scrolling/drag for responsiveness."""
-    heval('wait(0.02)')
+    heval('wait(1/50)')
     k = heval('GETKEY()')
     return k if k > 0 else 0
 

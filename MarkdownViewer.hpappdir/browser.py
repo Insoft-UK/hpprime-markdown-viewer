@@ -17,7 +17,6 @@ from file_ops import list_files, get_file_size
 from input_helpers import get_key, get_touch, get_menu_tap
 from ui import draw_menu
 import file_prefs
-import math
 
 # Column layout (pixel positions)
 _COL_FAV_X = const(7)
@@ -69,82 +68,18 @@ def _format_size(size):
     return str(whole) + '.' + str(frac) + ' KB'
 
 
-def _draw_pie(cx, cy, r, pct, fg_color, bg_color, border_color):
-    """Draw a tiny filled pie chart showing pct% progress.
+def _draw_progress_bar(x, y, w, h, pct, fg_color, bg_color, border_color):
+    """Draw a tiny horizontal progress bar showing pct% progress.
 
-    Uses hpprime.circle for the outline and scanline integer-distance
-    checks for the interior fill — no sqrt, pixel-perfect alignment.
+    Lightweight alternative to pie chart — no trig, no pixel loops.
+    Just three fillrect calls at most.
     """
-    from hpprime import circle as _circle
-
-    if pct <= 0:
-        _circle(GR_AFF, cx, cy, r, border_color)
-        return
-
-    if pct >= 100:
-        # Fill entire interior then outline
-        r2 = r * r
-        for dy in range(-r + 1, r):
-            for dx in range(-r + 1, r):
-                if dx * dx + dy * dy < r2:
-                    pass  # will be covered by run below
-            # Scanline: find first and last interior pixel
-            x0 = None
-            x1 = None
-            for dx in range(-r + 1, r):
-                if dx * dx + dy * dy < r2:
-                    if x0 is None:
-                        x0 = dx
-                    x1 = dx
-            if x0 is not None:
-                fillrect(GR_AFF, cx + x0, cy + dy,
-                         x1 - x0 + 1, 1, fg_color, fg_color)
-        _circle(GR_AFF, cx, cy, r, border_color)
-        return
-
-    # Partial fill: threshold angle (clockwise from 12 o'clock)
-    thresh = pct * 2 * math.pi / 100
-    r2 = r * r
-
-    for dy in range(-r + 1, r):
-        # Find interior span for this scanline
-        x0 = None
-        x1 = None
-        for dx in range(-r + 1, r):
-            if dx * dx + dy * dy < r2:
-                if x0 is None:
-                    x0 = dx
-                x1 = dx
-        if x0 is None:
-            continue
-
-        # Fill background across the full interior span
-        fillrect(GR_AFF, cx + x0, cy + dy,
-                 x1 - x0 + 1, 1, bg_color, bg_color)
-
-        # Now overlay foreground for pixels in the pie sector
-        fg_start = None
-        for dx in range(x0, x1 + 1):
-            if dx * dx + dy * dy < r2:
-                angle = math.atan2(dx, -dy)
-                if angle < 0:
-                    angle += 2 * math.pi
-                if angle <= thresh:
-                    if fg_start is None:
-                        fg_start = dx
-                    fg_end = dx
-                else:
-                    if fg_start is not None:
-                        fillrect(GR_AFF, cx + fg_start, cy + dy,
-                                 fg_end - fg_start + 1, 1,
-                                 fg_color, fg_color)
-                        fg_start = None
-        if fg_start is not None:
-            fillrect(GR_AFF, cx + fg_start, cy + dy,
-                     fg_end - fg_start + 1, 1,
-                     fg_color, fg_color)
-
-    _circle(GR_AFF, cx, cy, r, border_color)
+    # Border
+    fillrect(GR_AFF, x, y, w, h, border_color, bg_color)
+    # Fill
+    if pct > 0:
+        fw = max(1, (w - 2) * min(pct, 100) // 100)
+        fillrect(GR_AFF, x + 1, y + 1, fw, h - 2, fg_color, fg_color)
 
 
 def _file_label(fname):
@@ -237,20 +172,33 @@ def file_picker(title="Files", subtitle="Select a file", ext=None,
 
     def draw_screen():
         c = _get_colors(colors)
-        fillrect(0, 0, 0, 320, menu_y, c['browser_bg'], c['browser_bg'])
+        # Cache color lookups to avoid repeated dict access and
+        # guard against KeyError if theme dict is incomplete.
+        bg = c.get('browser_bg', 0xF8F8F8)
+        subtitle_c = c.get('browser_subtitle', 0x000080)
+        hint_c = c.get('browser_hint', subtitle_c)
+        hdr_bg = c.get('table_header_bg', 0xE8E8E8)
+        tbl_bdr = c.get('table_border', 0xAAAAAA)
+        br_bdr = c.get('browser_border', 0x000080)
+        sel_bg = c.get('browser_sel', 0x000080)
+        sel_text = c.get('browser_sel_text', 0xF8F8F8)
+        normal_text = c.get('browser_text', 0x000000)
+        alt_bg = c.get('table_alt_bg', bg)
+        err_c = c.get('browser_error', 0xF80000)
+        prog_fg = c.get('progress_bar', c.get('header', 0x000080))
+
+        fillrect(0, 0, 0, 320, menu_y, bg, bg)
 
         # Title
         tw = text_width(title, FONT_14)
         draw_text(GR_AFF, (320 - tw) // 2, 5, title, FONT_14,
-                  c['browser_subtitle'])
+                  subtitle_c)
         # Subtitle
-        draw_text(GR_AFF, 10, 23, subtitle, FONT_10,
-                  c.get('browser_hint', c['browser_subtitle']))
+        draw_text(GR_AFF, 10, 23, subtitle, FONT_10, hint_c)
 
         # Column header background
         draw_rectangle(GR_AFF, 5, _HDR_Y, 315, _HDR_Y + _HDR_H,
-                       c['table_header_bg'], 255,
-                       c['table_header_bg'], 255)
+                       hdr_bg, 255, hdr_bg, 255)
 
         col, asc = file_prefs.get_sort()
         arrow = ' \u25B2' if asc else ' \u25BC'
@@ -267,35 +215,33 @@ def file_picker(title="Files", subtitle="Select a file", ext=None,
         if col == 'name':
             name_hdr += arrow
         draw_text(GR_AFF, _COL_NAME_X + 2, _HDR_Y + 2, name_hdr, FONT_10,
-                  c['browser_subtitle'])
+                  subtitle_c)
 
         # Size column header
         size_hdr = 'Size'
         if col == 'size':
             size_hdr += arrow
         draw_text(GR_AFF, _COL_SIZE_X + 2, _HDR_Y + 2, size_hdr, FONT_10,
-                  c['browser_subtitle'])
+                  subtitle_c)
 
         # Column dividers in header
         draw_rectangle(GR_AFF, _COL_DIV1, _HDR_Y,
                        _COL_DIV1 + 1, _HDR_Y + _HDR_H,
-                       c['table_border'], 255, c['table_border'], 255)
+                       tbl_bdr, 255, tbl_bdr, 255)
         draw_rectangle(GR_AFF, _COL_DIV2, _HDR_Y,
                        _COL_DIV2 + 1, _HDR_Y + _HDR_H,
-                       c['table_border'], 255, c['table_border'], 255)
+                       tbl_bdr, 255, tbl_bdr, 255)
 
         # Separator below header
         draw_rectangle(GR_AFF, 5, _SEP_Y, 315, _SEP_Y + 1,
-                       c['table_border'], 255, c['table_border'], 255)
+                       tbl_bdr, 255, tbl_bdr, 255)
 
         # Left / right borders
         bdr_bottom = menu_y - 3
         draw_rectangle(GR_AFF, 5, _HDR_Y, 6, bdr_bottom,
-                       c['browser_border'], 255,
-                       c['browser_border'], 255)
+                       br_bdr, 255, br_bdr, 255)
         draw_rectangle(GR_AFF, 314, _HDR_Y, 315, bdr_bottom,
-                       c['browser_border'], 255,
-                       c['browser_border'], 255)
+                       br_bdr, 255, br_bdr, 255)
 
         # File rows
         start = 0
@@ -310,17 +256,13 @@ def file_picker(title="Files", subtitle="Select a file", ext=None,
 
             if i == selected:
                 draw_rectangle(GR_AFF, 6, y, 314, y + _ITEM_H - 2,
-                               c['browser_sel'], 255,
-                               c['browser_sel'], 255)
-                text_c = c['browser_sel_text']
+                               sel_bg, 255, sel_bg, 255)
+                text_c = sel_text
             else:
-                text_c = c['browser_text']
+                text_c = normal_text
                 if (i - start) % 2 == 1:
                     draw_rectangle(GR_AFF, 6, y, 314, y + _ITEM_H - 2,
-                                   c.get('table_alt_bg', c['browser_bg']),
-                                   255,
-                                   c.get('table_alt_bg', c['browser_bg']),
-                                   255)
+                                   alt_bg, 255, alt_bg, 255)
 
             # Favorite star
             if is_fav:
@@ -328,8 +270,7 @@ def file_picker(title="Files", subtitle="Select a file", ext=None,
                           FONT_10, _fav_color())
             elif highlight and fname == highlight and i != selected:
                 draw_text(GR_AFF, _COL_FAV_X + 4, y + 3, '\u25B6',
-                          FONT_10,
-                          c.get('browser_hint', c['browser_subtitle']))
+                          FONT_10, hint_c)
 
             # File name
             max_name_w = _COL_DIV2 - _COL_NAME_X - 4
@@ -340,27 +281,18 @@ def file_picker(title="Files", subtitle="Select a file", ext=None,
             draw_text(GR_AFF, _COL_SIZE_X + 2, y + 3, size_str,
                       FONT_10, text_c)
 
-            # Reading progress pie chart
+            # Reading progress bar
             pct = file_prefs.get_progress(fname)
             if pct > 0:
-                pie_cx = _COL_RIGHT - 8
-                pie_cy = y + _ITEM_H // 2 - 1
-                pie_r = 5
-                pie_fg = c.get('progress_bar', c['header'])
-                if i == selected:
-                    pie_bg = c['browser_sel']
-                elif (i - start) % 2 == 1:
-                    pie_bg = c.get('table_alt_bg', c['browser_bg'])
-                else:
-                    pie_bg = c['browser_bg']
-                pie_border = c.get('browser_hint', c['table_border'])
-                _draw_pie(pie_cx, pie_cy, pie_r, pct,
-                          pie_fg, pie_bg, pie_border)
+                bar_x = _COL_RIGHT - 16
+                bar_y = y + _ITEM_H // 2 - 2
+                bar_bg = sel_bg if i == selected else (
+                    alt_bg if (i - start) % 2 == 1 else bg)
+                _draw_progress_bar(bar_x, bar_y, 14, 4, pct,
+                                   prog_fg, bar_bg, hint_c)
 
             # Column dividers for this row
-            div_c = c['table_border']
-            if i == selected:
-                div_c = c.get('browser_sel', div_c)
+            div_c = sel_bg if i == selected else tbl_bdr
             draw_rectangle(GR_AFF, _COL_DIV1, y,
                            _COL_DIV1 + 1, y + _ITEM_H - 2,
                            div_c, 255, div_c, 255)
@@ -370,12 +302,11 @@ def file_picker(title="Files", subtitle="Select a file", ext=None,
 
         if len(items) == 0:
             draw_text(GR_AFF, 15, _ITEM_Y0 + 6, "No files found", FONT_10,
-                      c.get('browser_error', 0xF80000))
+                      err_c)
 
         # Bottom border
         draw_rectangle(GR_AFF, 5, bdr_bottom, 315, bdr_bottom + 1,
-                       c['browser_border'], 255,
-                       c['browser_border'], 255)
+                       br_bdr, 255, br_bdr, 255)
         draw_menu(menu_labels, menu_y=menu_y, colors=c)
 
     def _header_tap(tx):
