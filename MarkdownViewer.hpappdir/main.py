@@ -1,5 +1,7 @@
 """MarkdownViewer for HP Prime — main entry point."""
 
+import gc
+import ppl_guard
 from constants import (GR_AFF, DRAG_THRESHOLD, MENU_Y, VIEWER_HEIGHT_FULL,
     LONG_PRESS_MS, FONT_10)
 from hpprime import fillrect
@@ -126,6 +128,7 @@ def _draw_progress(viewer):
 
 def main():
     """Main entry point — file browser then markdown viewer."""
+    ppl_guard.init()
     theme.init()
     last_file, last_scroll = load_last_file()
 
@@ -141,9 +144,13 @@ def main():
         )
         if filename is None:
             clear_screen()
+            ppl_guard.cleanup()
             return
 
         file_prefs.add_recent(filename)
+
+        # Free browser memory before loading document
+        gc.collect()
 
         # Navigation back-stack: list of (filename, scroll_pos)
         nav_stack = []
@@ -452,6 +459,7 @@ def main():
 
         if action == 'exit':
             clear_screen()
+            ppl_guard.cleanup()
             return
 
 
@@ -459,3 +467,5 @@ try:
     main()
 except KeyboardInterrupt:
     clear_screen()
+finally:
+    ppl_guard.cleanup()
