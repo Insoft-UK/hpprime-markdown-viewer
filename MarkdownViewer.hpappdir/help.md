@@ -25,6 +25,8 @@ No PC required. See also: [Link Demo](demo.md)
 - Press **+/-** to scroll page by page
 - Press **Backspace** to jump to start
 - Press **LOG** to jump to end
+- Press **Left** to go back (previous file)
+- Press **Right** to go forward (next file)
 - Press **ESC** to go back to file browser
 - Drag on the **touchscreen** to scroll
 - Press **ON** to exit
@@ -47,6 +49,13 @@ Favorites persist across app restarts.
 Tap **Recent** in the menu bar (or press **F1**)
 to see a list of your last 10 opened files.
 Select one to open it directly.
+
+#### Help
+
+Tap **Help** in the menu bar (or press **F5**)
+to open this help file. The app automatically
+selects a translated version if available
+(e.g. `help_es.md` for Spanish).
 
 #### Column Sorting
 
@@ -78,6 +87,21 @@ multiple "folders" this way:
 
 This is purely a display convention — all files
 remain in the same app directory on the calculator.
+
+#### File Tags
+
+Long-press a file in the browser to assign a
+colored tag category. Available tags:
+
+- **None** — no tag (default)
+- **Math** — blue dot
+- **Science** — green dot
+- **Notes** — orange dot
+- **Work** — red dot
+- **Personal** — purple dot
+
+Tagged files show a small colored dot before the
+filename. Tags are saved across app restarts.
 
 ### Rich Text Rendering
 
@@ -166,31 +190,88 @@ Matching text is highlighted in the document.
 
 ## Table of Contents
 
-Tap **TOC** in the menu bar (or press **F3**) to
+Tap **TOC** in the menu bar (or press **F4**) to
 see a list of all headers in the document.
 Select a header to jump directly to that section.
 
-## Document Info
+## More Menu
 
-Tap **Info** in the menu bar (or press **F5**) to
-see document statistics:
+Tap **More** in the menu bar (or press **F5**) to
+access additional settings and tools:
+
+### Font Size
+
+Cycle the body text through **10px**, **12px**, and
+**14px** font sizes. Headers scale proportionally.
+This setting affects the current viewing session.
+
+### Word Wrap
+
+Toggle word wrap **ON** or **OFF**. When off, long
+lines are clipped at the right edge instead of
+wrapping to the next line. Useful for code-heavy
+documents.
+
+### Split View (TOC Pane)
+
+Toggle a mini table-of-contents pane at the top
+of the screen. It shows up to 5 headers around
+your current position, with the active section
+highlighted. Tap a header in the pane to jump
+directly to that section.
+
+### Go to %
+
+Jump to a specific position in the document by
+entering a percentage (0–100). Useful for quickly
+navigating long documents.
+
+### Keyboard Shortcuts
+
+Show an overlay listing all keyboard shortcuts
+available in the viewer. Press any key or tap to
+dismiss.
+
+### Doc Info
+
+See document statistics:
 - Filename
 - Line count
 - Word count
 - Estimated reading time
 
+### Forward
+
+When available, navigate forward in your browsing
+history (after using back navigation).
+
+## Collapsible Sections
+
+Tap a **header** in the document to collapse or
+expand its content. Collapsed headers show a **▶**
+indicator; expanded headers show **▼**.
+
+All content under the header (up to the next header
+of equal or higher level) is hidden when collapsed.
+This works for all header levels (H1–H6).
+
 ## Internal Links
 
 Links to other `.md` files (e.g. `[See setup](setup.md)`)
 are tappable. Tap to open the linked file.
-Press **ESC** to go back to the previous file.
-Multiple levels of back-navigation are supported.
+Press **Left** or **ESC** to go back to the previous file.
+Press **Right** to go forward again.
+Multiple levels of back/forward navigation are supported.
 
 ## Reading Progress
 
 A percentage indicator is shown at the bottom of
 the screen, showing how far you have scrolled
 through the document.
+
+Your scroll position is saved per-file, so when
+you reopen a document, you pick up right where
+you left off.
 
 ## Themes
 
@@ -200,8 +281,13 @@ browser and the document viewer.
 
 ## Bookmarks
 
-Long-press anywhere in the document to add a bookmark
-at the current scroll position.
+Long-press anywhere in the document to open a
+context menu with the following options:
+
+- **Add Bookmark** — save current position
+- **Copy Line** — copy the line at that position
+  to the PPL clipboard (accessible via `AVars("Clipboard")`)
+- **Tag** — cycle the file's tag category
 
 Bookmarks appear as **red marks** on the scrollbar.
 

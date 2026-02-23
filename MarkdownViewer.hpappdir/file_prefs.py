@@ -180,3 +180,113 @@ def set_progress(filename, percent):
     pct = max(0, min(100, int(percent)))
     _progress[filename] = pct
     _save_progress_file(_progress)
+
+
+# --- Per-file scroll positions ---
+
+_positions = None
+
+
+def _load_positions():
+    try:
+        with open('.positions', 'r') as f:
+            text = f.read().strip()
+        if not text:
+            return {}
+        d = {}
+        for line in text.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+            idx = line.rfind(':')
+            if idx > 0:
+                try:
+                    d[line[:idx]] = int(line[idx + 1:])
+                except:
+                    pass
+        return d
+    except:
+        return {}
+
+
+def _save_positions(d):
+    try:
+        with open('.positions', 'w') as f:
+            for k in d:
+                f.write(k + ':' + str(d[k]) + '\n')
+    except:
+        pass
+
+
+def get_scroll_pos(filename):
+    """Get saved scroll position for a file. Returns 0 if not saved."""
+    global _positions
+    if _positions is None:
+        _positions = _load_positions()
+    return _positions.get(filename, 0)
+
+
+def set_scroll_pos(filename, pos):
+    """Save scroll position for a file."""
+    global _positions
+    if _positions is None:
+        _positions = _load_positions()
+    _positions[filename] = int(pos)
+    _save_positions(_positions)
+
+
+# --- File tags / categories ---
+
+TAG_COLORS = [0x000000, 0x0000CC, 0x008800, 0xCC6600, 0xCC0000, 0x8800AA]
+TAG_NAMES = ['None', 'Math', 'Science', 'Notes', 'Work', 'Personal']
+
+_tags = None
+
+
+def _load_tags():
+    try:
+        with open('.tags', 'r') as f:
+            text = f.read().strip()
+        if not text:
+            return {}
+        d = {}
+        for line in text.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+            idx = line.rfind(':')
+            if idx > 0:
+                try:
+                    d[line[:idx]] = int(line[idx + 1:])
+                except:
+                    pass
+        return d
+    except:
+        return {}
+
+
+def _save_tags(d):
+    try:
+        with open('.tags', 'w') as f:
+            for k in d:
+                if d[k] > 0:
+                    f.write(k + ':' + str(d[k]) + '\n')
+    except:
+        pass
+
+
+def get_tag(filename):
+    """Get tag ID for a file. Returns 0 (None) if not tagged."""
+    global _tags
+    if _tags is None:
+        _tags = _load_tags()
+    return _tags.get(filename, 0)
+
+
+def set_tag(filename, tag_id):
+    """Set tag ID for a file (0 = no tag)."""
+    global _tags
+    if _tags is None:
+        _tags = _load_tags()
+    _tags[filename] = tag_id
+    _save_tags(_tags)
