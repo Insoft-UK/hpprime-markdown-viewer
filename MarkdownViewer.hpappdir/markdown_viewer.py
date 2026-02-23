@@ -261,6 +261,107 @@ class MarkdownViewer:
             return 100
         return min(100, int(r.scroll_offset * 100 / m))
 
+    def cycle_font(self):
+        """Cycle body font through 10px, 12px, 14px."""
+        if not self.document.renderer:
+            return
+        r = self.document.renderer
+        fonts = [FONT_10, FONT_12, FONT_14]
+        heights = [12, 14, 16]
+        idx = fonts.index(r._body_font) if r._body_font in fonts else 0
+        idx = (idx + 1) % 3
+        r._body_font = fonts[idx]
+        r.line_height = heights[idx]
+        r._content_height = 0
+        self.document.render(self.gr, height=self.height)
+
+    def get_font_label(self):
+        """Return current body font size as string label."""
+        if not self.document.renderer:
+            return '10'
+        f = self.document.renderer._body_font
+        return {FONT_10: '10', FONT_12: '12', FONT_14: '14'}.get(f, '10')
+
+    def toggle_word_wrap(self):
+        """Toggle word wrap on/off."""
+        if not self.document.renderer:
+            return
+        r = self.document.renderer
+        r._word_wrap = not r._word_wrap
+        r._content_height = 0
+        self.document.render(self.gr, height=self.height)
+
+    def is_word_wrap(self):
+        """Return True if word wrap is enabled."""
+        if self.document.renderer:
+            return self.document.renderer._word_wrap
+        return True
+
+    def toggle_collapse_at(self, tx, ty):
+        """Toggle collapse for a header at screen coords. Returns True if toggled."""
+        if not self.document.renderer:
+            return False
+        r = self.document.renderer
+        for x1, y1, x2, y2, line_idx in r._header_zones:
+            if x1 <= tx <= x2 and y1 <= ty <= y2:
+                if line_idx in r._collapsed_headers:
+                    r._collapsed_headers.discard(line_idx)
+                else:
+                    r._collapsed_headers.add(line_idx)
+                r._content_height = 0
+                self.document.render(self.gr, height=self.height)
+                return True
+        return False
+
+    def get_line_text_at_y(self, screen_y):
+        """Get source text of the line at screen Y coordinate."""
+        if not self.document.renderer or not self.document.content:
+            return None
+        r = self.document.renderer
+        if not r._line_y_cache:
+            return None
+        abs_y = screen_y + r.scroll_offset - r.y
+        cache = r._line_y_cache
+        lo, hi = 0, len(cache) - 1
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if cache[mid] <= abs_y:
+                lo = mid
+            else:
+                hi = mid - 1
+        pos = 0
+        content = self.document.content
+        for i in range(lo):
+            nl = content.find('\n', pos)
+            if nl == -1:
+                return None
+            pos = nl + 1
+        end = content.find('\n', pos)
+        if end == -1:
+            return content[pos:]
+        return content[pos:end]
+
+    def set_split_viewport(self, y, height):
+        """Set the renderer viewport for split-view mode."""
+        if self.document.renderer:
+            r = self.document.renderer
+            r.y = y
+            r.height = height
+            r._content_height = 0
+
+    def get_current_header_idx(self):
+        """Return index of the header nearest to current scroll position."""
+        headers = self.get_headers()
+        if not headers or not self.document.renderer:
+            return 0
+        r = self.document.renderer
+        best = 0
+        for i, (_, _, line_idx) in enumerate(headers):
+            if r._line_y_cache and line_idx < len(r._line_y_cache):
+                if r._line_y_cache[line_idx] <= r.scroll_offset:
+                    best = i
+        return best
+
     def get_document_stats(self):
         """Return (line_count, word_count, read_time_min) for the document."""
         content = self.document.content
@@ -309,11 +410,15 @@ class MarkdownRenderer:
         self._search_match_idx = 0
         self._bookmarks = []
         self._link_zones = []  # [(x1, y1, x2, y2, url)] for tap detection
+        self._header_zones = []  # [(x1, y1, x2, y2, line_idx)] for collapse taps
         self._line_y_cache = []     # abs Y offset per source line
         self._line_fence_cache = [] # code-fence state per source line
         self._in_math_fence = False
         self._math_buffer = []
         self._formula_cache = {}    # expr -> (width, height)
+        self._body_font = FONT_10
+        self._word_wrap = True
+        self._collapsed_headers = set()
 
     def _in_view(self, y, h=12):
         """Check if a line at y with height h is within the visible area."""
@@ -362,6 +467,7 @@ class MarkdownRenderer:
         self._math_buffer = []
         self._blockquote_depth = 0
         self._link_zones = []
+        self._header_zones = []
 
         lines = markdown_text.split('\n')
         n = len(lines)
@@ -370,6 +476,9 @@ class MarkdownRenderer:
         # Only rebuild search positions during measurement pass
         if self._search_term and is_measuring:
             self._search_positions = []
+
+        # Compute lines to skip due to collapsed headers
+        skip_lines = self._compute_skip_lines(lines)
 
         if is_measuring:
             # --- Full measurement pass: build cache ---
@@ -385,7 +494,22 @@ class MarkdownRenderer:
                     cache_f.append(1)
                 else:
                     cache_f.append(0)
-                self._render_line(line)
+                if skip_lines and _li in skip_lines:
+                    # Track fence state for skipped lines
+                    stripped = line.strip()
+                    if stripped.startswith('```'):
+                        if self._in_math_fence:
+                            self._in_math_fence = False
+                        elif self._in_code_fence:
+                            self._in_code_fence = False
+                        else:
+                            tag = stripped[3:].strip().lower()
+                            if tag in ('math', 'formula', 'cas'):
+                                self._in_math_fence = True
+                            else:
+                                self._in_code_fence = True
+                    continue
+                self._render_line(line, _li)
                 # Periodically collect garbage during large documents
                 if _li % 80 == 79:
                     gc.collect()
@@ -419,21 +543,49 @@ class MarkdownRenderer:
             for i in range(start_idx, n):
                 if self.current_y > self.y + self.height:
                     break
-                self._render_line(lines[i])
+                if skip_lines and i in skip_lines:
+                    continue
+                self._render_line(lines[i], i)
             if self._table_buffer:
                 self._flush_table()
         else:
             # --- Fallback: no cache, content_height known ---
-            for line in lines:
+            for _i, line in enumerate(lines):
                 if self.current_y > self.y + self.height:
                     break
-                self._render_line(line)
+                if skip_lines and _i in skip_lines:
+                    continue
+                self._render_line(line, _i)
             if self._table_buffer:
                 self._flush_table()
 
         self._draw_scrollbar()
 
-    def _render_line(self, line):
+    def _compute_skip_lines(self, lines):
+        """Compute set of line indices hidden by collapsed headers."""
+        if not self._collapsed_headers:
+            return None
+        skip = set()
+        n = len(lines)
+        for ci in self._collapsed_headers:
+            if ci >= n:
+                continue
+            hline = lines[ci].strip()
+            lvl = 0
+            while lvl < len(hline) and hline[lvl] == '#':
+                lvl += 1
+            for i in range(ci + 1, n):
+                sl = lines[i].strip()
+                if sl.startswith('#'):
+                    hlvl = 0
+                    while hlvl < len(sl) and sl[hlvl] == '#':
+                        hlvl += 1
+                    if hlvl <= lvl:
+                        break
+                skip.add(i)
+        return skip if skip else None
+
+    def _render_line(self, line, line_idx=-1):
         """Render a single line of markdown."""
         line = line.rstrip()
 
@@ -484,7 +636,7 @@ class MarkdownRenderer:
         elif stripped.startswith('!['):
             self._render_image(stripped)
         elif line.startswith('#'):
-            self._render_header(line)
+            self._render_header(line, line_idx)
         elif stripped == '---' or stripped == '***' or stripped == '___':
             self._render_hr()
         elif stripped.startswith('>'):
@@ -650,17 +802,19 @@ class MarkdownRenderer:
                     tokens = self._tokenize_code(line, lang)
                     cx = self.x + 4
                     max_x = self.x + self.width
+                    bf = self._body_font
                     for text, color in tokens:
-                        tw = text_width(text, FONT_10)
+                        tw = text_width(text, bf)
                         if cx + tw > max_x:
                             break
                         draw_text(self.gr, cx, self.current_y,
-                                  text, FONT_10, color,
+                                  text, bf, color,
                                   max_x - cx, bg_color=code_bg)
                         cx += tw
                 else:
                     draw_text(self.gr, self.x + 4, self.current_y,
-                              line, FONT_10, theme.colors['code'],
+                              line, self._body_font,
+                              theme.colors['code'],
                               self.width - 4, bg_color=code_bg)
         self.current_y += self.line_height
 
@@ -680,7 +834,7 @@ class MarkdownRenderer:
         else:
             size = get_formula_size(expr)
             if size is None:
-                fw = min(text_width(expr, FONT_10) + 20,
+                fw = min(text_width(expr, self._body_font) + 20,
                          self.width - 20)
                 size = (fw, 14)
             self._formula_cache[expr] = size
@@ -725,7 +879,7 @@ class MarkdownRenderer:
                       c['normal'], 255)
         self.current_y += 6
 
-    def _render_header(self, line):
+    def _render_header(self, line, line_idx=-1):
         """Render a header line (# Header)."""
         level = 0
         while level < len(line) and line[level] == '#':
@@ -734,20 +888,33 @@ class MarkdownRenderer:
             level = 6
 
         text = line[level:].strip()
+        bf = self._body_font
 
         if level == 1:
-            fontsize = FONT_14
+            fontsize = max(FONT_14, bf)
             self.current_y += 3
         elif level == 2:
-            fontsize = FONT_12
+            fontsize = max(FONT_12, bf)
             self.current_y += 2
         else:
-            fontsize = FONT_10
+            fontsize = bf
+
+        # Collapse indicator
+        collapsed = line_idx >= 0 and line_idx in self._collapsed_headers
+        prefix = '\u25B6 ' if collapsed else '\u25BC '
+        display = prefix + text
 
         h = self.line_height + fontsize * 4
         if self._in_view(self.current_y, h):
             draw_text(self.gr, self.x, self.current_y,
-                      text, fontsize, theme.colors['header'], self.width)
+                      display, fontsize, theme.colors['header'],
+                      self.width)
+            # Record tappable header zone
+            if line_idx >= 0:
+                self._header_zones.append((
+                    self.x, self.current_y,
+                    self.x + self.width,
+                    self.current_y + h, line_idx))
         self.current_y += h
         self.current_y += 3
 
@@ -798,7 +965,8 @@ class MarkdownRenderer:
 
         if self._in_view(self.current_y):
             draw_text(self.gr, bullet_x, self.current_y,
-                      bullet, FONT_10, theme.colors['normal'],
+                      bullet, self._body_font,
+                      theme.colors['normal'],
                       self.x + self.width - bullet_x)
         self._render_wrapped(text, text_x)
 
@@ -839,7 +1007,7 @@ class MarkdownRenderer:
         for row in rows:
             for i in range(len(row)):
                 if i < num_cols:
-                    w = text_width(row[i], FONT_10)
+                    w = text_width(row[i], self._body_font)
                     if w > col_widths[i]:
                         col_widths[i] = w
 
@@ -887,13 +1055,14 @@ class MarkdownRenderer:
                                    t_border, 255, row_bg, 255)
 
                     txt_color = c_bold if is_header else c_normal
+                    bf = self._body_font
                     draw_text(gr, cx + pad, self.current_y + 1,
-                              cell_text, FONT_10, txt_color,
+                              cell_text, bf, txt_color,
                               col_widths[ci], bg_color=row_bg)
                     if is_header:
                         draw_text(gr, cx + pad + 1, self.current_y + 1,
-                                  cell_text, FONT_10, c_bold,
-                                  col_widths[ci])
+                                  cell_text, bf, c_bold,
+                              col_widths[ci])
                     cx += cell_w
 
             self.current_y += row_h
@@ -905,7 +1074,8 @@ class MarkdownRenderer:
         msg = '[Table too wide (' + str(num_cols) + ' cols)]'
         if self._in_view(self.current_y):
             draw_text(self.gr, self.x, self.current_y,
-                      msg, FONT_10, theme.colors['warning'], self.width)
+                      msg, self._body_font, theme.colors['warning'],
+                      self.width)
         self.current_y += self.line_height
 
     def _render_paragraph(self, line):
@@ -947,8 +1117,10 @@ class MarkdownRenderer:
         }
         search_hl = c['search_hl']
         search_term = self._search_term
-        # Cache space width and line height to avoid repeated lookups
-        sp_w = text_width(' ', FONT_10)
+        # Cache body font, space width and line height
+        bf = self._body_font
+        wrap = self._word_wrap
+        sp_w = text_width(' ', bf)
         lh = self.line_height
         gr = self.gr
         in_view = self._in_view
@@ -964,9 +1136,10 @@ class MarkdownRenderer:
                 word = words[wi]
                 if wi > 0:
                     if current_x + sp_w > max_x and current_x > start_x:
-                        self.current_y += lh
-                        current_x = start_x
-                        self._draw_line_decorations()
+                        if wrap:
+                            self.current_y += lh
+                            current_x = start_x
+                            self._draw_line_decorations()
                     else:
                         current_x += sp_w
 
@@ -974,14 +1147,18 @@ class MarkdownRenderer:
                     continue
 
                 word = str(word)
-                w = text_width(word, FONT_10)
+                w = text_width(word, bf)
                 if current_x + w > max_x and current_x > start_x:
-                    self.current_y += lh
-                    current_x = start_x
-                    self._draw_line_decorations()
+                    if wrap:
+                        self.current_y += lh
+                        current_x = start_x
+                        self._draw_line_decorations()
 
                 if in_view(self.current_y):
                     clip_w = max_x - current_x
+                    if clip_w <= 0:
+                        current_x += w
+                        continue
 
                     # Search highlighting
                     hw = word if self._search_case else word.lower()
@@ -995,10 +1172,10 @@ class MarkdownRenderer:
                             self._search_positions.append(abs_y)
 
                     draw_text(gr, current_x, self.current_y,
-                              word, FONT_10, color, clip_w)
+                              word, bf, color, clip_w)
                     if seg_type == 'bold':
                         draw_text(gr, current_x + 1, self.current_y,
-                                  word, FONT_10, color, clip_w)
+                                  word, bf, color, clip_w)
 
                     # Strikethrough line
                     if seg_type == 'strikethrough':

@@ -165,6 +165,10 @@ def file_picker(title="Files", subtitle="Select a file", ext=None,
     touch_down = False
     tap_x = -1
     tap_y = -1
+    touch_start_time = 0
+    long_press_fired = False
+
+    from input_helpers import get_ticks
 
     def _fav_color():
         c = _get_colors(colors)
@@ -272,9 +276,15 @@ def file_picker(title="Files", subtitle="Select a file", ext=None,
                 draw_text(GR_AFF, _COL_FAV_X + 4, y + 3, '\u25B6',
                           FONT_10, hint_c)
 
-            # File name
-            max_name_w = _COL_DIV2 - _COL_NAME_X - 4
-            draw_text(GR_AFF, _COL_NAME_X + 2, y + 3, label,
+            # File name + tag dot
+            tag_id = file_prefs.get_tag(fname)
+            name_x = _COL_NAME_X + 2
+            if tag_id > 0 and tag_id < len(file_prefs.TAG_COLORS):
+                tc = file_prefs.TAG_COLORS[tag_id]
+                fillrect(GR_AFF, name_x, y + 6, 6, 6, tc, tc)
+                name_x += 9
+            max_name_w = _COL_DIV2 - name_x - 2
+            draw_text(GR_AFF, name_x, y + 3, label,
                       FONT_10, text_c, max_name_w)
 
             # Size
@@ -390,11 +400,45 @@ def file_picker(title="Files", subtitle="Select a file", ext=None,
 
             tx, ty = get_touch()
             if tx >= 0 and ty >= 0:
-                touch_down = True
-                tap_x = tx
-                tap_y = ty
+                if not touch_down:
+                    touch_down = True
+                    tap_x = tx
+                    tap_y = ty
+                    touch_start_time = get_ticks()
+                    long_press_fired = False
+                else:
+                    # Long press detection for tag assignment
+                    if (not long_press_fired and items
+                            and tap_y >= _ITEM_Y0 and tap_y < menu_y
+                            and abs(tx - tap_x) + abs(ty - tap_y) < 10):
+                        elapsed = get_ticks() - touch_start_time
+                        if elapsed >= 600:  # LONG_PRESS_MS
+                            long_press_fired = True
+                            start_row = 0
+                            if selected >= _MAX_VISIBLE:
+                                start_row = selected - _MAX_VISIBLE + 1
+                            row = (tap_y - _ITEM_Y0) // _ITEM_H
+                            tapped = start_row + row
+                            if tapped < len(items):
+                                fname = items[tapped][0]
+                                from ui import show_context_menu
+                                cur_tag = file_prefs.get_tag(fname)
+                                tag_labels = []
+                                for ti in range(len(file_prefs.TAG_NAMES)):
+                                    lbl = file_prefs.TAG_NAMES[ti]
+                                    if ti == cur_tag:
+                                        lbl = '\u2713 ' + lbl
+                                    tag_labels.append(lbl)
+                                choice = show_context_menu(
+                                    tap_x, tap_y, tag_labels,
+                                    content_bottom=menu_y)
+                                if choice >= 0:
+                                    file_prefs.set_tag(fname, choice)
+                                draw_screen()
             elif touch_down:
                 touch_down = False
+                if long_press_fired:
+                    continue
                 # Column header tap
                 if _HDR_Y <= tap_y < _SEP_Y and 5 < tap_x < 315:
                     if _header_tap(tap_x):

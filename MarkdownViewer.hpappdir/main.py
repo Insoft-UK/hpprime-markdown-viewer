@@ -7,21 +7,21 @@ from constants import (GR_AFF, DRAG_THRESHOLD, MENU_Y, VIEWER_HEIGHT_FULL,
 from hpprime import fillrect
 from keycodes import (KEY_UP, KEY_DOWN, KEY_ESC, KEY_PLUS,
     KEY_MINUS, KEY_BACKSPACE, KEY_LOG, KEY_F1, KEY_F2,
-    KEY_F3, KEY_F4, KEY_F5, KEY_F6)
+    KEY_F3, KEY_F4, KEY_F5, KEY_F6, KEY_LEFT, KEY_RIGHT)
 from markdown_viewer import MarkdownViewer
 from input_helpers import get_key, get_key_fast, get_touch, get_ticks, get_menu_tap, mouse_clear
 from ui import (draw_menu, draw_notch, is_notch_tap,
     save_menu_area, restore_menu_area,
     show_search_input, show_context_menu, show_list_manager,
-    show_stats_dialog)
+    show_stats_dialog, show_goto_dialog, show_shortcuts_overlay)
 from graphics import draw_text, text_width
 from browser import file_picker
 import theme
 import bookmarks
 import file_prefs
 
-VIEWER_MENU = ["Find", "Next", "Marks", "TOC", "Info", "Theme"]
-BROWSER_MENU = ["Recent", "", "", "", "", "Theme"]
+VIEWER_MENU = ["Find", "Next", "Marks", "TOC", "More", "Theme"]
+BROWSER_MENU = ["Recent", "", "", "", "Help", "Theme"]
 
 
 def save_last_file(filename, scroll_pos):
@@ -78,10 +78,42 @@ def _browser_menu_tap(slot, selected_file):
             if idx < len(recent):
                 return 'open:' + recent[idx]
         return True
+    elif slot == 4:  # Help
+        return 'open:' + _find_help_file()
     elif slot == 5:  # Theme
         theme.toggle()
         return True
     return False
+
+
+def _find_help_file():
+    """Find the best help file based on system language."""
+    try:
+        from hpprime import eval as heval
+        lang = heval('Language')
+        codes = []
+        if type(lang) is int:
+            m = {2: 'es', 3: 'fr', 4: 'de', 5: 'it', 6: 'pt'}
+            if lang in m:
+                codes.append(m[lang])
+        elif type(lang) is str:
+            lang_l = lang[:4].lower()
+            for prefix, code in [('espa', 'es'), ('fran', 'fr'),
+                                  ('deut', 'de'), ('ital', 'it')]:
+                if prefix in lang_l:
+                    codes.append(code)
+                    break
+        for code in codes:
+            name = 'help_' + code + '.md'
+            try:
+                with open(name, 'r') as f:
+                    f.read(1)
+                return name
+            except:
+                pass
+    except:
+        pass
+    return 'help.md'
 
 
 _search_pill_x = 320  # left edge of the search status pill
@@ -152,12 +184,18 @@ def main():
         # Free browser memory before loading document
         gc.collect()
 
-        # Navigation back-stack: list of (filename, scroll_pos)
+        # Navigation stacks: back and forward
         nav_stack = []
+        fwd_stack = []
+        split_mode = False
         viewer = MarkdownViewer(GR_AFF, height=VIEWER_HEIGHT_FULL)
         viewer.load_markdown_file(filename)
 
-        if filename == last_file and last_scroll > 0:
+        # Restore per-file scroll position
+        saved_scroll = file_prefs.get_scroll_pos(filename)
+        if saved_scroll > 0:
+            viewer.set_scroll_position(saved_scroll)
+        elif filename == last_file and last_scroll > 0:
             viewer.set_scroll_position(last_scroll)
 
         marks = bookmarks.load(filename)
@@ -293,9 +331,13 @@ def main():
             if not url.endswith('.md'):
                 return False
             nav_stack.append((filename, viewer.get_scroll_position()))
+            del fwd_stack[:]  # New direction clears forward history
             filename = url
             viewer = MarkdownViewer(GR_AFF, height=VIEWER_HEIGHT_FULL)
             viewer.load_markdown_file(filename)
+            saved_s = file_prefs.get_scroll_pos(filename)
+            if saved_s > 0:
+                viewer.set_scroll_position(saved_s)
             marks = bookmarks.load(filename)
             viewer.set_bookmarks(marks)
             redraw()
@@ -306,6 +348,7 @@ def main():
             nonlocal filename, marks, viewer
             if not nav_stack:
                 return False
+            fwd_stack.append((filename, viewer.get_scroll_position()))
             prev_file, prev_scroll = nav_stack.pop()
             filename = prev_file
             viewer = MarkdownViewer(GR_AFF, height=VIEWER_HEIGHT_FULL)
@@ -315,6 +358,99 @@ def main():
             viewer.set_bookmarks(marks)
             redraw()
             return True
+
+        def navigate_forward():
+            """Pop the forward-stack, going to the next file."""
+            nonlocal filename, marks, viewer
+            if not fwd_stack:
+                return False
+            nav_stack.append((filename, viewer.get_scroll_position()))
+            next_file, next_scroll = fwd_stack.pop()
+            filename = next_file
+            viewer = MarkdownViewer(GR_AFF, height=VIEWER_HEIGHT_FULL)
+            viewer.load_markdown_file(filename)
+            viewer.set_scroll_position(next_scroll)
+            marks = bookmarks.load(filename)
+            viewer.set_bookmarks(marks)
+            redraw()
+            return True
+
+        def _draw_split_toc():
+            """Draw the mini-TOC pane in split view mode."""
+            c = theme.colors
+            fillrect(0, 0, 0, 320, 82, c['bg'], c['bg'])
+            from graphics import draw_rectangle as _dr
+            _dr(GR_AFF, 0, 80, 320, 82,
+                c['table_border'], 255, c['table_border'], 255)
+            headers = viewer.get_headers()
+            if not headers:
+                draw_text(GR_AFF, 10, 5, "No headers",
+                          FONT_10, c.get('italic', c['normal']))
+                return
+            cur = viewer.get_current_header_idx()
+            max_show = 5
+            start = max(0, cur - max_show // 2)
+            sel_bg = c.get('browser_sel', 0x000080)
+            sel_t = c.get('browser_sel_text', 0xFFFFFF)
+            for i in range(start, min(start + max_show, len(headers))):
+                y = 4 + (i - start) * 15
+                level, title, _ = headers[i]
+                prefix = '  ' * (level - 1)
+                if i == cur:
+                    fillrect(0, 5, y, 310, 14, sel_bg, sel_bg)
+                    draw_text(GR_AFF, 10, y + 1, prefix + title,
+                              FONT_10, sel_t, 300)
+                else:
+                    draw_text(GR_AFF, 10, y + 1, prefix + title,
+                              FONT_10, c['normal'], 300)
+
+        def toggle_split():
+            nonlocal split_mode
+            split_mode = not split_mode
+            if split_mode:
+                viewer.set_split_viewport(85, VIEWER_HEIGHT_FULL - 80)
+            else:
+                viewer.set_split_viewport(5, VIEWER_HEIGHT_FULL)
+            redraw()
+            if split_mode:
+                _draw_split_toc()
+
+        def open_more_menu():
+            """Show the More submenu with settings and navigation."""
+            nonlocal menu_visible
+            menu_visible = False
+            wrap_label = "Wrap: ON" if viewer.is_word_wrap() else "Wrap: OFF"
+            font_label = "Font: " + viewer.get_font_label() + "px"
+            split_label = "Split: ON" if split_mode else "Split: OFF"
+            choices = [font_label, wrap_label, split_label,
+                       "Go to %", "Shortcuts", "Doc Info"]
+            if fwd_stack:
+                choices.append("Forward \u25B6")
+            choice = show_context_menu(160, 100, choices,
+                                       content_bottom=220)
+            if choice == 0:  # Font
+                viewer.cycle_font()
+                redraw()
+            elif choice == 1:  # Wrap
+                viewer.toggle_word_wrap()
+                redraw()
+            elif choice == 2:  # Split
+                toggle_split()
+            elif choice == 3:  # Go to %
+                pct = show_goto_dialog()
+                if pct is not None:
+                    viewer.scroll_to_ratio(pct / 100.0)
+                    viewer.render()
+                redraw()
+            elif choice == 4:  # Shortcuts
+                show_shortcuts_overlay()
+                redraw()
+            elif choice == 5:  # Doc Info
+                open_stats()
+            elif choice == 6 and fwd_stack:
+                navigate_forward()
+            else:
+                redraw()
 
         try:
             while True:
@@ -354,10 +490,16 @@ def main():
                     elif key == KEY_F4:
                         open_toc()
                     elif key == KEY_F5:
-                        open_stats()
+                        open_more_menu()
                     elif key == KEY_F6:
                         theme.toggle()
                         redraw()
+                    elif key == KEY_LEFT:
+                        if not navigate_back():
+                            break
+                        continue
+                    elif key == KEY_RIGHT:
+                        navigate_forward()
 
                 tx, ty = get_touch()
                 if tx >= 0 and ty >= 0:
@@ -391,13 +533,29 @@ def main():
                                 elapsed = get_ticks() - touch_start_time
                                 if elapsed >= LONG_PRESS_MS:
                                     long_press_fired = True
+                                    ctx_items = ["Add Bookmark",
+                                                 "Copy Line"]
+                                    # Add tag assignment
+                                    cur_tag = file_prefs.get_tag(filename)
+                                    tag_label = "Tag: " + file_prefs.TAG_NAMES[cur_tag]
+                                    ctx_items.append(tag_label)
                                     choice = show_context_menu(
-                                        tap_x, tap_y, ["Add Bookmark"],
+                                        tap_x, tap_y, ctx_items,
                                         content_bottom=240)
                                     if choice == 0:
                                         pos = viewer.get_scroll_position()
                                         marks = bookmarks.add(filename, pos)
                                         viewer.set_bookmarks(marks)
+                                    elif choice == 1:
+                                        line_text = viewer.get_line_text_at_y(tap_y)
+                                        if line_text:
+                                            safe = line_text.replace('\\', '\\\\').replace('"', '\\"')
+                                            from hpprime import eval as _he
+                                            _he('AVars("Clipboard"):="' + safe + '"')
+                                    elif choice == 2:
+                                        # Cycle tag
+                                        new_tag = (cur_tag + 1) % len(file_prefs.TAG_NAMES)
+                                        file_prefs.set_tag(filename, new_tag)
                                     redraw()
                                     touch_down = False
                                     drag_last_y = -1
@@ -429,7 +587,7 @@ def main():
                                         elif slot == 3:
                                             open_toc()
                                         elif slot == 4:
-                                            open_stats()
+                                            open_more_menu()
                                         elif slot == 5:
                                             theme.toggle()
                                             menu_visible = False
@@ -444,10 +602,28 @@ def main():
                                     viewer.search_next()
                                     _draw_overlay()
                                 else:
-                                    # Check for link tap
-                                    url = viewer.get_link_at(tap_x, tap_y)
-                                    if url:
-                                        navigate_link(url)
+                                    # Check for header collapse tap
+                                    if viewer.toggle_collapse_at(tap_x, tap_y):
+                                        _draw_overlay()
+                                    else:
+                                        # Check for link tap
+                                        url = viewer.get_link_at(tap_x, tap_y)
+                                        if url:
+                                            navigate_link(url)
+                                    # Split view TOC tap
+                                    if split_mode and tap_y < 82:
+                                        headers = viewer.get_headers()
+                                        if headers:
+                                            cur = viewer.get_current_header_idx()
+                                            max_show = 5
+                                            start = max(0, cur - max_show // 2)
+                                            row = (tap_y - 4) // 15
+                                            idx = start + row
+                                            if 0 <= idx < len(headers):
+                                                _, _, li = headers[idx]
+                                                viewer.scroll_to_line(li)
+                                                _draw_overlay()
+                                                _draw_split_toc()
                         drag_last_y = -1
         except KeyboardInterrupt:
             action = 'exit'
@@ -455,6 +631,7 @@ def main():
         last_file = filename
         last_scroll = viewer.get_scroll_position()
         save_last_file(filename, last_scroll)
+        file_prefs.set_scroll_pos(filename, last_scroll)
         file_prefs.set_progress(filename, viewer.get_progress_percent())
 
         if action == 'exit':
