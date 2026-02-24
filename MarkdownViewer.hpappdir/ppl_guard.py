@@ -8,19 +8,16 @@ When comma-decimal mode is active, PPL function calls that use commas
 as argument separators (e.g. TEXTSIZE("hi",2)) or dots in decimal
 numbers (e.g. wait(0.05)) will silently fail or produce wrong results.
 
-This module saves the current HSeparator setting, forces dot-decimal
-mode (HSeparator:=0), and provides cleanup to restore the original
-setting on exit.
+This module saves the current HSeparator setting at startup and forces
+dot-decimal mode (HSeparator:=0).  The original value is restored once
+on application exit via cleanup().  HSeparator is never modified in
+between — all PPL eval calls are safe for the entire app lifetime.
 
-Usage — call once at startup:
+Usage — call once at startup, restore once at exit:
     import ppl_guard
     ppl_guard.init()      # force dot mode
     ...                   # all PPL eval calls are now safe
     ppl_guard.cleanup()   # restore original setting on exit
-
-Or use the context manager for scoped protection:
-    with ppl_guard.PPLSafe():
-        result = heval('TEXTSIZE("hello",2)')
 
 Reference: https://www.hpmuseum.org/forum/thread-23501.html
 """
@@ -62,30 +59,3 @@ def cleanup():
             heval('HSeparator:=%d' % _saved_separator)
         except:
             pass
-
-
-class PPLSafe:
-    """Context manager for safe PPL eval calls.
-
-    Temporarily forces dot decimal separator mode:
-
-        with PPLSafe():
-            result = heval('TEXTSIZE("hello",2)')
-    """
-    def __enter__(self):
-        try:
-            self._prev = int(heval('HSeparator'))
-        except:
-            self._prev = 0
-        try:
-            heval('HSeparator:=0')
-        except:
-            pass
-        return self
-
-    def __exit__(self, *args):
-        try:
-            heval('HSeparator:=%d' % self._prev)
-        except:
-            pass
-        return False
