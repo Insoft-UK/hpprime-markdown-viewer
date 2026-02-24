@@ -4,6 +4,20 @@ All notable changes to MarkdownViewer for HP Prime are documented in this file.
 
 ---
 
+## [1.2.0] — 2026-02-24
+
+### Fixed
+- **Code block rendering** — text shifted down 1px and per-token `bg_color` removed; fixes the background starting 1px too early and adjacent syntax-highlighted keywords being clipped by 1px when touching.
+- **Table rendering** — cell rectangles now drawn 1px larger so adjacent borders overlap instead of doubling; text shifted down for proper vertical centering; per-cell `bg_color` removed to prevent text background from overwriting cell borders.
+- **HSeparator overhead** — removed the `PPLSafe` context manager class which added ~3 extra `hpprime.eval()` calls per PPL invocation (~1ms each). HSeparator is now set to 0 once at startup and restored once at exit — never modified in between.
+- **Exit path cleanup** — `clear_screen()` and `ppl_guard.cleanup()` consolidated into a single `finally` block; removed duplicate calls from two internal exit paths inside `main()`.
+
+### Changed
+- **Double buffering** — all markdown rendering now draws to an off-screen back buffer (G1) and is blitted to the visible screen (G0) in a single `strblit2` call after each frame. Eliminates visible flickering during scrolling, especially on physical hardware.
+- **Memory pressure reduction** — document lines are now pre-split once at load time and passed by reference to every render call, eliminating ~N string allocations per frame from `split('\n')`. Inline parser rewritten to use index tracking instead of character-by-character buffering. Lists cleared in-place with `del lst[:]` instead of reassignment. Periodic `gc.collect()` added during scroll renders. Accessor methods (`get_headers`, `get_line_text_at_y`, `get_document_stats`) now use the cached lines list.
+
+---
+
 ## [1.1.0] — 2026-02-23
 
 ### Added

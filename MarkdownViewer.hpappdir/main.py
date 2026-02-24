@@ -175,8 +175,6 @@ def main():
             menu_y=MENU_Y,
         )
         if filename is None:
-            clear_screen()
-            ppl_guard.cleanup()
             return
 
         file_prefs.add_recent(filename)
@@ -635,14 +633,13 @@ def main():
         file_prefs.set_progress(filename, viewer.get_progress_percent())
 
         if action == 'exit':
-            clear_screen()
-            ppl_guard.cleanup()
             return
 
 
 try:
     main()
 except KeyboardInterrupt:
-    clear_screen()
+    pass
 finally:
+    clear_screen()
     ppl_guard.cleanup()

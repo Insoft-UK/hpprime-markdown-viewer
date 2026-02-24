@@ -1,6 +1,7 @@
 from micropython import const
 
 GR_AFF = const(0)
+GR_BACK = const(1)    # Off-screen back buffer for double buffering
 GR_TMP = const(5)
 TRANSPARENCY = const(0xA8A8A7)
 

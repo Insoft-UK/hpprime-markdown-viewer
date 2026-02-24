@@ -1,9 +1,9 @@
 from graphics import (draw_text, draw_rectangle, text_width, draw_image,
     open_file, blit, get_grob_size, get_formula_size, render_formula)
 from constants import (FONT_10, FONT_12, FONT_14,
-    TABLE_MAX_COLS, TABLE_CELL_PAD, GR_TMP, TRANSPARENCY,
-    SCROLLBAR_WIDTH, SCROLLBAR_MIN_THUMB, BLOCKQUOTE_INDENT,
-    BLOCKQUOTE_BAR_WIDTH, NESTED_LIST_INDENT)
+    TABLE_MAX_COLS, TABLE_CELL_PAD, GR_TMP, GR_BACK, GR_AFF,
+    TRANSPARENCY, SCROLLBAR_WIDTH, SCROLLBAR_MIN_THUMB,
+    BLOCKQUOTE_INDENT, BLOCKQUOTE_BAR_WIDTH, NESTED_LIST_INDENT)
 import gc
 import theme
 
@@ -191,10 +191,10 @@ class MarkdownViewer:
 
         Returns list of (level, title, line_index) tuples.
         """
-        if not self.document.content:
+        if not self.document.lines:
             return []
         headers = []
-        for i, line in enumerate(self.document.content.split('\n')):
+        for i, line in enumerate(self.document.lines):
             stripped = line.strip()
             if stripped.startswith('#'):
                 level = 0
@@ -213,7 +213,7 @@ class MarkdownViewer:
         Uses the cached per-line Y offsets for exact positioning.
         Falls back to a measurement pass if the cache is not yet built.
         """
-        if not self.document.renderer or not self.document.content:
+        if not self.document.renderer or not self.document.lines:
             return
         r = self.document.renderer
 
@@ -315,7 +315,7 @@ class MarkdownViewer:
 
     def get_line_text_at_y(self, screen_y):
         """Get source text of the line at screen Y coordinate."""
-        if not self.document.renderer or not self.document.content:
+        if not self.document.renderer or not self.document.lines:
             return None
         r = self.document.renderer
         if not r._line_y_cache:
@@ -329,17 +329,10 @@ class MarkdownViewer:
                 lo = mid
             else:
                 hi = mid - 1
-        pos = 0
-        content = self.document.content
-        for i in range(lo):
-            nl = content.find('\n', pos)
-            if nl == -1:
-                return None
-            pos = nl + 1
-        end = content.find('\n', pos)
-        if end == -1:
-            return content[pos:]
-        return content[pos:end]
+        lines = self.document.lines
+        if lo < len(lines):
+            return lines[lo]
+        return None
 
     def set_split_viewport(self, y, height):
         """Set the renderer viewport for split-view mode."""
@@ -364,10 +357,9 @@ class MarkdownViewer:
 
     def get_document_stats(self):
         """Return (line_count, word_count, read_time_min) for the document."""
-        content = self.document.content
-        if not content:
+        lines = self.document.lines
+        if not lines:
             return (0, 0, 0)
-        lines = content.split('\n')
         line_count = len(lines)
         word_count = 0
         for line in lines:
@@ -419,6 +411,7 @@ class MarkdownRenderer:
         self._body_font = FONT_10
         self._word_wrap = True
         self._collapsed_headers = set()
+        self._render_count = 0
 
     def _in_view(self, y, h=12):
         """Check if a line at y with height h is within the visible area."""
@@ -452,24 +445,32 @@ class MarkdownRenderer:
                   bg, 255, bg, 255)
         self.current_y = self.y
 
-    def render(self, markdown_text):
-        """Render markdown text to the graphics buffer.
+    def render(self, lines):
+        """Render pre-split lines to the graphics buffer.
 
         First render (content_height==0) does a full measurement pass,
         building a per-line Y-offset cache.  Subsequent renders use
         the cache to skip lines above the viewport (partial render).
+
+        Args:
+            lines: list of strings (pre-split document lines).
         """
+        # Periodic GC during scroll renders to combat firmware
+        # memory fragmentation on constrained hardware.
+        self._render_count += 1
+        if self._render_count % 8 == 0:
+            gc.collect()
+
         self.clear()
         self.current_y = self.y - self.scroll_offset
-        self._table_buffer = []
+        del self._table_buffer[:]
         self._in_code_fence = False
         self._in_math_fence = False
-        self._math_buffer = []
+        del self._math_buffer[:]
         self._blockquote_depth = 0
-        self._link_zones = []
-        self._header_zones = []
+        del self._link_zones[:]
+        del self._header_zones[:]
 
-        lines = markdown_text.split('\n')
         n = len(lines)
         is_measuring = self._content_height == 0
 
@@ -792,7 +793,7 @@ class MarkdownRenderer:
         """Render a line inside a code fence with syntax highlighting."""
         if self._in_view(self.current_y, self.line_height):
             code_bg = theme.colors['code_bg']
-            # Fill background in one call, then overlay text with bg_color
+            # Fill background in one call, then overlay text without bg_color
             from hpprime import fillrect as _fr
             _fr(self.gr, self.x, self.current_y,
                 self.width, self.line_height, code_bg, code_bg)
@@ -807,15 +808,15 @@ class MarkdownRenderer:
                         tw = text_width(text, bf)
                         if cx + tw > max_x:
                             break
-                        draw_text(self.gr, cx, self.current_y,
+                        draw_text(self.gr, cx, self.current_y + 1,
                                   text, bf, color,
-                                  max_x - cx, bg_color=code_bg)
+                                  max_x - cx)
                         cx += tw
                 else:
-                    draw_text(self.gr, self.x + 4, self.current_y,
+                    draw_text(self.gr, self.x + 4, self.current_y + 1,
                               line, self._body_font,
                               theme.colors['code'],
-                              self.width - 4, bg_color=code_bg)
+                              self.width - 4)
         self.current_y += self.line_height
 
     def _flush_math(self):
@@ -824,7 +825,7 @@ class MarkdownRenderer:
             expr = line.strip()
             if expr:
                 self._render_formula(expr)
-        self._math_buffer = []
+        del self._math_buffer[:]
 
     def _render_formula(self, expr):
         """Render a CAS expression as a formatted formula."""
@@ -1043,26 +1044,31 @@ class MarkdownRenderer:
             else:
                 row_bg = bg
 
-            if self._in_view(self.current_y, row_h):
+            # Draw cell rectangles 1px larger so adjacent borders overlap
+            # (avoids double-thick internal grid lines).
+            if self._in_view(self.current_y, row_h + 1):
                 cx = self.x
                 gr = self.gr
                 for ci in range(num_cols):
                     cell_w = col_widths[ci] + pad * 2
                     cell_text = row[ci] if ci < len(row) else ''
 
+                    # +1 on right/bottom so internal borders overlap instead of doubling
                     draw_rectangle(gr, cx, self.current_y,
-                                   cx + cell_w, self.current_y + row_h,
-                                   t_border, 255, row_bg, 255)
+                                  cx + cell_w + 1, self.current_y + row_h + 1,
+                                  t_border, 255, row_bg, 255)
 
                     txt_color = c_bold if is_header else c_normal
-                    bf = self._body_font
-                    draw_text(gr, cx + pad, self.current_y + 1,
-                              cell_text, bf, txt_color,
-                              col_widths[ci], bg_color=row_bg)
-                    if is_header:
-                        draw_text(gr, cx + pad + 1, self.current_y + 1,
-                                  cell_text, bf, c_bold,
+                    # No bg_color here: TEXTOUT_P background can overwrite borders.
+                    # Shift down by 1px compared to the old code.
+                    draw_text(gr, cx + pad, self.current_y + 3,
+                              cell_text, FONT_10, txt_color,
                               col_widths[ci])
+                    # Faux-bold header
+                    if is_header:
+                        draw_text(gr, cx + pad + 1, self.current_y + 3,
+                                  cell_text, FONT_10, c_bold,
+                                  col_widths[ci])
                     cx += cell_w
 
             self.current_y += row_h
@@ -1207,77 +1213,85 @@ class MarkdownRenderer:
 
         Returns list of tuples: (type, text) or (type, text, url) for links.
         Type is one of: 'normal', 'bold', 'italic', 'code', 'strikethrough', 'link'.
+
+        Uses index tracking instead of character-by-character buffering
+        to minimize temporary string allocations on constrained hardware.
         """
         segments = []
         i = 0
-        buf = []  # Use list + join instead of string concatenation
+        n = len(text)
+        ns = 0  # start of current normal-text span
 
-        while i < len(text):
+        while i < n:
+            ch = text[i]
+
             # ~~strikethrough~~
-            if i < len(text) - 1 and text[i:i + 2] == '~~':
-                if buf:
-                    segments.append(('normal', ''.join(buf)))
-                    buf = []
+            if ch == '~' and i + 1 < n and text[i + 1] == '~':
+                if i > ns:
+                    segments.append(('normal', text[ns:i]))
                 end = text.find('~~', i + 2)
                 if end != -1:
                     segments.append(('strikethrough', text[i + 2:end]))
                     i = end + 2
+                    ns = i
                     continue
+                ns = i
 
             # [link text](url)
-            if text[i] == '[':
+            if ch == '[':
                 bracket_end = text.find(']', i + 1)
-                if (bracket_end != -1 and bracket_end + 1 < len(text)
+                if (bracket_end != -1 and bracket_end + 1 < n
                         and text[bracket_end + 1] == '('):
                     paren_end = text.find(')', bracket_end + 2)
                     if paren_end != -1:
-                        if buf:
-                            segments.append(('normal', ''.join(buf)))
-                            buf = []
-                        link_text = text[i + 1:bracket_end]
-                        link_url = text[bracket_end + 2:paren_end]
-                        segments.append(('link', link_text, link_url))
+                        if i > ns:
+                            segments.append(('normal', text[ns:i]))
+                        segments.append(('link', text[i + 1:bracket_end],
+                                         text[bracket_end + 2:paren_end]))
                         i = paren_end + 1
+                        ns = i
                         continue
 
             # **bold**
-            if i < len(text) - 1 and text[i:i + 2] == '**':
-                if buf:
-                    segments.append(('normal', ''.join(buf)))
-                    buf = []
+            if ch == '*' and i + 1 < n and text[i + 1] == '*':
+                if i > ns:
+                    segments.append(('normal', text[ns:i]))
                 end = text.find('**', i + 2)
                 if end != -1:
                     segments.append(('bold', text[i + 2:end]))
                     i = end + 2
+                    ns = i
                     continue
+                ns = i
 
             # *italic*
-            elif text[i] == '*':
-                if buf:
-                    segments.append(('normal', ''.join(buf)))
-                    buf = []
+            elif ch == '*':
+                if i > ns:
+                    segments.append(('normal', text[ns:i]))
                 end = text.find('*', i + 1)
                 if end != -1:
                     segments.append(('italic', text[i + 1:end]))
                     i = end + 1
+                    ns = i
                     continue
+                ns = i
 
             # `code`
-            elif text[i] == '`':
-                if buf:
-                    segments.append(('normal', ''.join(buf)))
-                    buf = []
+            elif ch == '`':
+                if i > ns:
+                    segments.append(('normal', text[ns:i]))
                 end = text.find('`', i + 1)
                 if end != -1:
                     segments.append(('code', text[i + 1:end]))
                     i = end + 1
+                    ns = i
                     continue
+                ns = i
 
-            buf.append(text[i])
             i += 1
 
-        if buf:
-            segments.append(('normal', ''.join(buf)))
+        if ns < n:
+            segments.append(('normal', text[ns:n]))
 
         return segments if segments else [('normal', text)]
 
@@ -1466,7 +1480,9 @@ class MarkdownDocument:
 
     def __init__(self):
         self.content = ""
+        self.lines = []
         self.renderer = None
+        self._back_inited = False
 
     def load_file(self, filename):
         """Load markdown from a text file line-by-line to reduce peak memory."""
@@ -1475,33 +1491,56 @@ class MarkdownDocument:
             with open(filename, 'r') as f:
                 for line in f:
                     lines.append(line.rstrip('\r\n'))
+            self.lines = lines
             self.content = '\n'.join(lines)
             gc.collect()
             return True
         except:
             self.content = "# Error\n\nCould not load file: " + filename
+            self.lines = self.content.split('\n')
             return False
 
+    def _ensure_back_buffer(self, width, height):
+        """Create/resize the off-screen back buffer once."""
+        if not self._back_inited:
+            from hpprime import dimgrob
+            dimgrob(GR_BACK, width, height, 0)
+            self._back_inited = True
+
+    def _flip(self, x, y, width, height):
+        """Blit the back buffer to the visible screen in one call."""
+        from hpprime import strblit2
+        strblit2(GR_AFF, x, y, width, height,
+                 GR_BACK, x, y, width, height)
+
     def render(self, gr, x=5, y=5, width=310, height=230):
-        """Render the document to a graphics buffer."""
+        """Render the document to the back buffer, then flip to screen."""
+        self._ensure_back_buffer(320, 240)
         if not self.renderer:
-            self.renderer = MarkdownRenderer(gr, x, y, width, height)
-        self.renderer.render(self.content)
+            self.renderer = MarkdownRenderer(GR_BACK, x, y, width, height)
+        self.renderer.render(self.lines)
+        self._flip(x, y, width, height)
 
     def scroll_up(self):
         if self.renderer:
-            self.renderer.scroll_up()
-            self.renderer.render(self.content)
+            r = self.renderer
+            r.scroll_up()
+            r.render(self.lines)
+            self._flip(r.x, r.y, r.width, r.height)
 
     def scroll_down(self):
         if self.renderer:
-            self.renderer.scroll_down()
-            self.renderer.render(self.content)
+            r = self.renderer
+            r.scroll_down()
+            r.render(self.lines)
+            self._flip(r.x, r.y, r.width, r.height)
 
     def scroll_by(self, delta):
         if self.renderer:
-            self.renderer.scroll_by(delta)
-            self.renderer.render(self.content)
+            r = self.renderer
+            r.scroll_by(delta)
+            r.render(self.lines)
+            self._flip(r.x, r.y, r.width, r.height)
 
     def scroll_by_fast(self, delta):
         """Scroll by delta pixels using strblit to shift existing content.
@@ -1516,7 +1555,8 @@ class MarkdownDocument:
         if (not r._line_y_cache or r._content_height == 0
                 or abs(delta) >= r.height // 2):
             r.scroll_by(delta)
-            r.render(self.content)
+            r.render(self.lines)
+            self._flip(r.x, r.y, r.width, r.height)
             return
 
         old_offset = r.scroll_offset
@@ -1526,7 +1566,7 @@ class MarkdownDocument:
             return
 
         from hpprime import strblit2, fillrect as _fr
-        gr = r.gr
+        bb = GR_BACK
         x = r.x
         y = r.y
         w = r.width
@@ -1535,38 +1575,46 @@ class MarkdownDocument:
 
         ad = abs(actual)
         if actual > 0:
-            # Scrolling down: shift visible content up
-            strblit2(gr, x, y, w, h - ad,
-                     gr, x, y + ad, w, h - ad)
+            # Scrolling down: shift back buffer content up
+            strblit2(bb, x, y, w, h - ad,
+                     bb, x, y + ad, w, h - ad)
             # Clear exposed strip at bottom
-            _fr(gr, x, y + h - ad, w, ad, bg, bg)
+            _fr(bb, x, y + h - ad, w, ad, bg, bg)
         else:
-            # Scrolling up: shift visible content down
-            strblit2(gr, x, y + ad, w, h - ad,
-                     gr, x, y, w, h - ad)
+            # Scrolling up: shift back buffer content down
+            strblit2(bb, x, y + ad, w, h - ad,
+                     bb, x, y, w, h - ad)
             # Clear exposed strip at top
-            _fr(gr, x, y, w, ad, bg, bg)
+            _fr(bb, x, y, w, ad, bg, bg)
 
-        # Full render to fill in the exposed strip and redraw scrollbar
-        # (the partial render optimization skips off-screen lines)
-        r.render(self.content)
+        # Render to back buffer, then flip to screen
+        r.render(self.lines)
+        self._flip(x, y, w, h)
 
     def scroll_page_up(self):
         if self.renderer:
-            self.renderer.scroll_page_up()
-            self.renderer.render(self.content)
+            r = self.renderer
+            r.scroll_page_up()
+            r.render(self.lines)
+            self._flip(r.x, r.y, r.width, r.height)
 
     def scroll_page_down(self):
         if self.renderer:
-            self.renderer.scroll_page_down()
-            self.renderer.render(self.content)
+            r = self.renderer
+            r.scroll_page_down()
+            r.render(self.lines)
+            self._flip(r.x, r.y, r.width, r.height)
 
     def scroll_to_top(self):
         if self.renderer:
-            self.renderer.scroll_to_top()
-            self.renderer.render(self.content)
+            r = self.renderer
+            r.scroll_to_top()
+            r.render(self.lines)
+            self._flip(r.x, r.y, r.width, r.height)
 
     def scroll_to_bottom(self):
         if self.renderer:
-            self.renderer.scroll_to_bottom()
-            self.renderer.render(self.content)
+            r = self.renderer
+            r.scroll_to_bottom()
+            r.render(self.lines)
+            self._flip(r.x, r.y, r.width, r.height)
